@@ -19,6 +19,7 @@ if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/godot-cpp/CMakeLists.txt")
 endif()
 
 # Add godot-cpp as a subdirectory
+set(GODOTCPP_USE_STATIC_CPP OFF CACHE BOOL "Force dynamic runtime" FORCE)
 add_subdirectory(godot-cpp)
 
 # -----------------------------------------------------------------------------
@@ -46,14 +47,28 @@ set(NODE_INCLUDE_DIRS
 if(WIN32)
     # Common locations for prebuilt node.lib or build artifacts
     # You might need to adjust this path or pass -DNODE_LIBRARY=path/to/node.lib
-    find_library(NODE_LIBRARY NAMES node libnode
-        PATHS
-        "${NODE_ROOT}/out/Release"
-        "${NODE_ROOT}/out/Debug"
-        NO_DEFAULT_PATH
-    )
+    # Prioritize libnode (DLL import lib) over node (EXE export lib)
+    
+    # Check explicitly for libnode.lib in the release folder to force usage
+    if(EXISTS "${NODE_ROOT}/out/Release/libnode.lib")
+        set(NODE_LIBRARY "${NODE_ROOT}/out/Release/libnode.lib")
+        message(STATUS "Found libnode.lib at ${NODE_LIBRARY}")
+    elseif(EXISTS "${NODE_ROOT}/out/Debug/libnode.lib")
+        set(NODE_LIBRARY "${NODE_ROOT}/out/Debug/libnode.lib")
+        message(STATUS "Found libnode.lib at ${NODE_LIBRARY}")
+    endif()
+
     if(NOT NODE_LIBRARY)
-        find_library(NODE_LIBRARY NAMES node libnode
+        find_library(NODE_LIBRARY NAMES libnode node
+            PATHS
+            "${NODE_ROOT}/out/Release"
+            "${NODE_ROOT}/out/Debug"
+            NO_DEFAULT_PATH
+        )
+    endif()
+
+    if(NOT NODE_LIBRARY)
+        find_library(NODE_LIBRARY NAMES libnode node
             PATHS
             "C:/Program Files/nodejs"
             DOC "Path to node.lib"
@@ -111,6 +126,8 @@ if(MINGW)
             -static-libgcc 
             -static-libstdc++
     )
+    # 显式移除可能由 godot-cpp 或其他地方带入的 MSVC 风格选项（如果需要）
+    # 目前 godot-cpp 会根据 MINGW 变量自动处理，这里主要关注 gode 自身的链接
 endif()
 
 if(NODE_LIBRARY)

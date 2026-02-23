@@ -9,8 +9,8 @@ JavascriptLanguage *JavascriptLanguage::singleton = nullptr;
 
 JavascriptLanguage::~JavascriptLanguage() {
 	if (singleton == this) {
-		ClassDB::_unregister_engine_singleton(JavascriptLanguage::get_class_static());
-		memdelete(singleton);
+		// ClassDB::_unregister_engine_singleton(JavascriptLanguage::get_class_static());
+		// memdelete(singleton);
 		singleton = nullptr;
 	}
 }
@@ -20,9 +20,9 @@ JavascriptLanguage *JavascriptLanguage::get_singleton() {
 		return singleton;
 	}
 	singleton = memnew(JavascriptLanguage);
-	if (likely(singleton)) {
-		ClassDB::_register_engine_singleton(JavascriptLanguage::get_class_static(), singleton);
-	}
+	// if (likely(singleton)) {
+	// 	ClassDB::_register_engine_singleton(JavascriptLanguage::get_class_static(), singleton);
+	// }
 	return singleton;
 }
 
@@ -57,22 +57,49 @@ bool JavascriptLanguage::_is_control_flow_keyword(const String &p_keyword) const
 }
 
 PackedStringArray JavascriptLanguage::_get_comment_delimiters() const {
-	PackedStringArray arr;
-	return arr;
+	PackedStringArray delimiters;
+	delimiters.push_back("//");
+	return delimiters;
 }
 
 PackedStringArray JavascriptLanguage::_get_doc_comment_delimiters() const {
-	PackedStringArray arr;
-	return arr;
+	PackedStringArray delimiters;
+	return delimiters;
 }
 
 PackedStringArray JavascriptLanguage::_get_string_delimiters() const {
-	PackedStringArray arr;
-	return arr;
+	PackedStringArray delimiters;
+	delimiters.push_back("\"\"");
+	delimiters.push_back("''");
+	return delimiters;
 }
 
 Ref<Script> JavascriptLanguage::_make_template(const String &p_template, const String &p_class_name, const String &p_base_class_name) const {
-	return Ref<Javascript>();
+	Ref<Javascript> script;
+	script.instantiate();
+
+	String class_name = p_class_name;
+	if (class_name.is_empty()) {
+		class_name = String("NewScript");
+	}
+
+	String base_name = p_base_class_name;
+
+	String code;
+	code += String("export default class ") + class_name;
+	if (!base_name.is_empty()) {
+		code += String(" extends ") + base_name;
+	}
+	code += String(" {\n");
+	code += String("\tconstructor() {\n");
+	code += String("\t\tsuper();\n");
+	code += String("\t}\n\n");
+	code += String("\t_ready() {\n");
+	code += String("\t}\n");
+	code += String("}\n");
+
+	script->_set_source_code(code);
+	return script;
 }
 
 TypedArray<Dictionary> JavascriptLanguage::_get_built_in_templates(const StringName &p_object) const {
@@ -94,7 +121,7 @@ String JavascriptLanguage::_validate_path(const String &p_path) const {
 }
 
 Object *JavascriptLanguage::_create_script() const {
-	return nullptr;
+	return memnew(Javascript);
 }
 
 bool JavascriptLanguage::_has_named_classes() const {

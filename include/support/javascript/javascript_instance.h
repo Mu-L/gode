@@ -12,6 +12,11 @@ class JavascriptInstance {
 	Object *owner = nullptr;
 	bool placeholder = false;
 
+	friend class JavascriptInstanceInfo;
+
+private:
+	bool compile_module();
+
 public:
 	JavascriptInstance(const Ref<Javascript> &p_javascript, Object *p_owner, bool p_placeholder);
 
@@ -23,7 +28,7 @@ public:
 
 	bool has_method(const StringName &p_method) const;
 	int32_t get_method_argument_count(const StringName &p_method, bool &r_is_valid) const;
-	Variant call(const StringName &p_method, const Variant **p_args, int32_t p_argcount, GDExtensionCallError &r_error);
+	Variant call(const StringName &p_method, const Variant *p_args, int32_t p_argcount, GDExtensionCallError &r_error);
 
 	String to_string(bool &r_is_valid) const;
 
@@ -39,3 +44,4 @@ public:
 } // namespace gode
 
 
+#endif // GODOT_JAVASCRIPT_INSTANCE_H

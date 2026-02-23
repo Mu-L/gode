@@ -1,13 +1,27 @@
 #include "support/javascript/javascript_instance.h"
+#include "godot_cpp/variant/utility_functions.hpp"
+#include "utils/javascript_vm.h"
 
 using namespace godot;
 
 namespace gode {
 
+bool JavascriptInstance::compile_module() {
+	if (!javascript.is_valid()) {
+		return false;
+	}
+	return true;
+}
+
 JavascriptInstance::JavascriptInstance(const Ref<Javascript> &p_javascript, Object *p_owner, bool p_placeholder) {
 	javascript = p_javascript;
 	owner = p_owner;
 	placeholder = p_placeholder;
+	if (!placeholder) {
+		if (!compile_module()) {
+			ERR_PRINT("Failed to compile module.");
+		}
+	}
 }
 
 Object *JavascriptInstance::get_owner() const {
@@ -41,7 +55,7 @@ int32_t JavascriptInstance::get_method_argument_count(const StringName &p_method
 	return 0;
 }
 
-Variant JavascriptInstance::call(const StringName &p_method, const Variant **p_args, int32_t p_argcount, GDExtensionCallError &r_error) {
+Variant JavascriptInstance::call(const StringName &p_method, const Variant *p_args, int32_t p_argcount, GDExtensionCallError &r_error) {
 	(void)p_method;
 	(void)p_args;
 	(void)p_argcount;
@@ -82,4 +96,3 @@ Ref<Javascript> JavascriptInstance::get_script() const {
 }
 
 } // namespace gode
-

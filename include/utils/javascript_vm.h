@@ -1,4 +1,4 @@
-﻿#ifndef GODE_UTILS_JAVASCRIPT_VM_H
+#ifndef GODE_UTILS_JAVASCRIPT_VM_H
 #define GODE_UTILS_JAVASCRIPT_VM_H
 
 #include "godot_cpp/variant/typed_array.hpp"
@@ -8,6 +8,12 @@
 #include <napi.h>
 
 namespace gode {
+
+class JsEnvManager {
+public:
+	static void init(Napi::Env env);
+	static napi_env get_raw();
+};
 
 godot::TypedArray<godot::Dictionary> extract_js_definitions(Napi::Env env, const godot::String &source);
 

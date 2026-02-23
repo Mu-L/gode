@@ -1,5 +1,7 @@
-#include "support/javascript/instance_info.h"
+#include "support/javascript/javascript_instance_info.h"
+#include "godot_cpp/core/memory.hpp"
 #include "support/javascript/javascript_instance.h"
+#include "support/javascript/javascript_language.h"
 
 using namespace godot;
 
@@ -174,7 +176,7 @@ static void javascript_instance_call(GDExtensionScriptInstanceDataPtr p_self, GD
 		return;
 	}
 	const StringName &method = *reinterpret_cast<const StringName *>(p_method);
-	const Variant **args = reinterpret_cast<const Variant *const *>(p_args);
+	const Variant *args = *reinterpret_cast<const Variant *const *>(p_args);
 	GDExtensionCallError local_error;
 	GDExtensionCallError &err = r_error ? *r_error : local_error;
 	Variant ret = instance->call(method, args, (int32_t)p_argument_count, err);
@@ -225,7 +227,7 @@ static GDExtensionObjectPtr javascript_instance_get_script(GDExtensionScriptInst
 	if (!script.is_valid()) {
 		return nullptr;
 	}
-	return script->get_godot_object();
+	return script->_owner;
 }
 
 static GDExtensionBool javascript_instance_is_placeholder(GDExtensionScriptInstanceDataPtr p_instance) {
@@ -237,22 +239,21 @@ static GDExtensionBool javascript_instance_is_placeholder(GDExtensionScriptInsta
 }
 
 static GDExtensionBool javascript_instance_set_fallback(GDExtensionScriptInstanceDataPtr p_instance, GDExtensionConstStringNamePtr p_name, GDExtensionConstVariantPtr p_value) {
-	return javascript_instance_set(p_instance, p_name, p_value);
+	return true;
 }
 
 static GDExtensionBool javascript_instance_get_fallback(GDExtensionScriptInstanceDataPtr p_instance, GDExtensionConstStringNamePtr p_name, GDExtensionVariantPtr r_ret) {
-	return javascript_instance_get(p_instance, p_name, r_ret);
+	return true;
 }
 
 static GDExtensionScriptLanguagePtr javascript_instance_get_language(GDExtensionScriptInstanceDataPtr p_instance) {
-	(void)p_instance;
-	return nullptr;
+	return JavascriptLanguage::get_singleton()->_owner;
 }
 
 static void javascript_instance_free(GDExtensionScriptInstanceDataPtr p_instance) {
 	JavascriptInstance *instance = cast_instance(p_instance);
 	if (instance) {
-		delete instance;
+		memdelete(instance);
 	}
 }
 

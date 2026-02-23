@@ -13,9 +13,9 @@ JavascriptLoader *JavascriptLoader::get_singleton() {
 		return singleton;
 	}
 	singleton = memnew(JavascriptLoader);
-	if (likely(singleton)) {
-		ClassDB::_register_engine_singleton(JavascriptLoader::get_class_static(), singleton);
-	}
+	// if (likely(singleton)) {
+	// 	ClassDB::_register_engine_singleton(JavascriptLoader::get_class_static(), singleton);
+	// }
 	return singleton;
 }
 
@@ -24,8 +24,8 @@ void JavascriptLoader::_bind_methods() {
 
 JavascriptLoader::~JavascriptLoader() {
 	if (singleton == this) {
-		ClassDB::_unregister_engine_singleton(JavascriptLoader::get_class_static());
-		memdelete(singleton);
+		// ClassDB::_unregister_engine_singleton(JavascriptLoader::get_class_static());
+		// memdelete(singleton);
 		singleton = nullptr;
 	}
 }
