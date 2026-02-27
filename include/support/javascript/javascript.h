@@ -4,6 +4,7 @@
 #include <godot_cpp/classes/script_extension.hpp>
 #include <godot_cpp/classes/script_language.hpp>
 #include <godot_cpp/core/method_ptrcall.hpp>
+#include <godot_cpp/templates/hash_map.hpp>
 
 namespace gode {
 
@@ -12,9 +13,19 @@ class Javascript : public godot::ScriptExtension {
 
 	bool is_dirty = false;
 	godot::String source_code;
+	
+	// Metadata cache
+	godot::StringName class_name;
+	godot::StringName base_class_name;
+	godot::TypedArray<godot::Dictionary> methods;
+	godot::TypedArray<godot::Dictionary> signals;
+	godot::TypedArray<godot::Dictionary> properties;
+	godot::HashMap<godot::StringName, godot::Variant> constants;
+	godot::HashMap<godot::StringName, int> member_lines;
 
 private:
 	bool compile();
+	void _update_metadata(); // Update metadata using Tree-sitter
 
 protected:
 	static void _bind_methods();

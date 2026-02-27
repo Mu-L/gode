@@ -65,6 +65,28 @@ void TestRunner::run_tests() {
 			assert.strictEqual(typeof fs_module.readFileSync, 'function');
 		});
 
+		test('require with res:// path (Module._findPath hook)', () => {
+			// Mock module object to test _findPath indirectly or test if require throws correct error
+			// Since we don't have a real file to require here easily without setup, 
+			// we can check if Module._findPath is patched correctly.
+			
+			const Module = require('module');
+			const originalFindPath = Module._findPath;
+			
+			// Test if our hook is active
+			const resPath = 'res://some/script.js';
+			const found = Module._findPath(resPath, [], false);
+			assert.strictEqual(found, resPath, 'Module._findPath should return res:// path as-is');
+			
+			// Test normal path behavior (should fallback to original)
+			// Note: Module._findPath usually returns false or string. 
+			// We just want to ensure it doesn't return the input string blindly for non-res paths.
+			const normalPath = './some/script.js';
+			// It will likely return false because file doesn't exist, which is different from returning the input string
+			const foundNormal = Module._findPath(normalPath, [], false); 
+			assert.notStrictEqual(foundNormal, normalPath, 'Should not return non-res path as-is');
+		});
+
 		console.log('--- Tests Completed ---');
 	)";
 

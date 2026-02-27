@@ -94,6 +94,32 @@ endif()
 
 #
 # -----------------------------------------------------------------------------
+# Tree-sitter
+# -----------------------------------------------------------------------------
+
+# Add tree-sitter core library
+if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tree-sitter/CMakeLists.txt")
+    message(STATUS "Initializing tree-sitter submodule...")
+    execute_process(COMMAND git submodule update --init --recursive tree-sitter WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+endif()
+
+# Tree-sitter core library
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "Build shared libs" FORCE)
+add_subdirectory(tree-sitter)
+
+# Add tree-sitter-javascript
+if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tree-sitter-javascript/src/parser.c")
+    message(STATUS "Initializing tree-sitter-javascript submodule...")
+    execute_process(COMMAND git submodule update --init --recursive tree-sitter-javascript WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+endif()
+
+add_library(tree-sitter-javascript STATIC
+    "${CMAKE_CURRENT_SOURCE_DIR}/tree-sitter-javascript/src/parser.c"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tree-sitter-javascript/src/scanner.c"
+)
+target_include_directories(tree-sitter-javascript PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/tree-sitter-javascript/src")
+
+# -----------------------------------------------------------------------------
 # Target: gode
 # -----------------------------------------------------------------------------
 
@@ -140,6 +166,8 @@ endif()
 
 target_link_libraries(gode
     godot::cpp
+    tree-sitter
+    tree-sitter-javascript
 )
 
 if(MINGW)

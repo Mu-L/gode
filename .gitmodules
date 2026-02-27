@@ -7,3 +7,9 @@
 [submodule "node"]
 	path = node
 	url = https://github.com/nodejs/node.git
+[submodule "tree-sitter-javascript"]
+	path = tree-sitter-javascript
+	url = https://github.com/tree-sitter/tree-sitter-javascript.git
+[submodule "tree-sitter"]
+	path = tree-sitter
+	url = https://github.com/tree-sitter/tree-sitter.git
