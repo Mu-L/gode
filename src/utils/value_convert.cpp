@@ -140,12 +140,8 @@ Napi::Value godot_to_napi(Napi::Env env, godot::Variant variant) {
 					return js_obj;
 				}
 			}
-
-			// If exact match fails, we could try parent classes if we had inheritance info.
-			// For now, return generic object or null.
 			return env.Null();
 		}
-
 		default:
 			return env.Undefined();
 	}

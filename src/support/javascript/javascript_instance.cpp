@@ -58,24 +58,27 @@ bool JavascriptInstance::is_placeholder() const {
 
 bool JavascriptInstance::set(const StringName &p_name, const Variant &p_value) {
 	v8::Locker locker(NodeRuntime::isolate);
-	(void)p_name;
-	(void)p_value;
-	return false;
+	return js_instance.Set(String(p_name).utf8().get_data(), godot_to_napi(JsEnvManager::get_env(), p_value));
 }
 
 bool JavascriptInstance::get(const StringName &p_name, Variant &r_value) const {
 	v8::Locker locker(NodeRuntime::isolate);
-	(void)p_name;
-	(void)r_value;
+	Napi::Object obj = js_instance.Value();
+	const char *prop_name = String(p_name).utf8().get_data();
+	if (obj.Has(prop_name)) {
+		Napi::Value val = js_instance.Get(prop_name);
+		r_value = napi_to_godot(val);
+		return true;
+	}
 	return false;
 }
 
 bool JavascriptInstance::has_method(const StringName &p_method) const {
-	v8::Locker locker(NodeRuntime::isolate);
 	if (js_instance.IsEmpty()) {
 		return false;
 	}
-	Napi::HandleScope scope(JsEnvManager::get_env());
+	v8::Locker locker(NodeRuntime::isolate);
+	v8::HandleScope scope(NodeRuntime::isolate);
 	v8::Isolate::Scope isolate_scope(NodeRuntime::isolate);
 	Napi::Object instance = js_instance.Value();
 	std::string method_name = String(p_method).utf8().get_data();

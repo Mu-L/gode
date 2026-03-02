@@ -190,7 +190,7 @@ bool Javascript::_instance_has(Object *p_object) const {
 }
 
 bool Javascript::_has_source_code() const {
-	return false;
+	return source_code.is_empty();
 }
 
 String Javascript::_get_source_code() const {
@@ -199,6 +199,7 @@ String Javascript::_get_source_code() const {
 
 void Javascript::_set_source_code(const String &p_code) {
 	is_dirty = true;
+	compile();
 	source_code = p_code;
 }
 
