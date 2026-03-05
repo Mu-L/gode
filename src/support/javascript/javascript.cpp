@@ -3,13 +3,13 @@
 #include "support/javascript/javascript_instance_info.h"
 #include "support/javascript/javascript_language.h"
 #include "utils/node_runtime.h"
-#include <gdextension_interface.h>
 #include <tree_sitter/api.h>
 #include <v8-isolate.h>
 #include <v8-locker.h>
+#include <godot_cpp/classes/file_access.hpp>
 #include <godot_cpp/classes/project_settings.hpp>
+#include <godot_cpp/classes/resource_loader.hpp>
 #include <godot_cpp/core/gdextension_interface_loader.hpp>
-#include <godot_cpp/godot.hpp>
 
 using namespace godot;
 using namespace gode;
@@ -139,9 +139,9 @@ bool Javascript::compile() const {
 
 					MethodInfo mi;
 					mi.name = method_name;
-                    if (is_static) {
-                        mi.flags |= METHOD_FLAG_STATIC;
-                    }
+					if (is_static) {
+						mi.flags |= METHOD_FLAG_STATIC;
+					}
 					methods[method_name] = mi;
 					member_lines[method_name] = ts_node_start_point(member).row + 1;
 				}
@@ -177,7 +177,131 @@ bool Javascript::_can_instantiate() const {
 }
 
 Ref<Script> Javascript::_get_base_script() const {
-	return Ref<Javascript>();
+	String base = String(base_class_name);
+	if (base.is_empty()) {
+		return Ref<Javascript>();
+	}
+	String req = base;
+	{
+		int64_t p1 = base.find("require(");
+		if (p1 >= 0) {
+			int64_t s1 = base.find("'", p1);
+			int64_t s2 = base.find("\"", p1);
+			int64_t s = -1;
+			int64_t e = -1;
+			if (s1 >= 0 && (s2 < 0 || s1 < s2)) {
+				s = s1 + 1;
+				e = base.find("'", s);
+			} else if (s2 >= 0) {
+				s = s2 + 1;
+				e = base.find("\"", s);
+			}
+			if (s >= 0 && e > s) {
+				req = base.substr(s, e - s);
+			}
+		}
+	}
+	if (req.is_empty()) {
+		return Ref<Javascript>();
+	}
+	String cur = get_path();
+	String cur_dir = cur;
+	{
+		int64_t p = cur_dir.rfind("/");
+		if (p >= 0) {
+			cur_dir = cur_dir.substr(0, p);
+		}
+	}
+	String resolved = req;
+	if (!req.begins_with("res://")) {
+		if (req.begins_with("./") || req.begins_with("../")) {
+			PackedStringArray left = cur_dir.replace("res://", "").split("/", false);
+			PackedStringArray right = req.split("/", false);
+			Vector<String> parts;
+			for (int i = 0; i < left.size(); i++) {
+				if (!left[i].is_empty()) {
+					parts.push_back(left[i]);
+				}
+			}
+			for (int i = 0; i < right.size(); i++) {
+				String seg = right[i];
+				if (seg == ".") {
+					continue;
+				}
+				if (seg == "..") {
+					if (parts.size() > 0) {
+						parts.remove_at(parts.size() - 1);
+					}
+					continue;
+				}
+				if (!seg.is_empty()) {
+					parts.push_back(seg);
+				}
+			}
+			String joined = "res://";
+			for (int i = 0; i < parts.size(); i++) {
+				if (i > 0) {
+					joined += "/";
+				}
+				joined += parts[i];
+			}
+			resolved = joined;
+		} else {
+			String base_nm = "res://node_modules/" + req;
+			String pkg_json = base_nm + "/package.json";
+			if (FileAccess::file_exists(pkg_json)) {
+				String main_rel;
+				String pkg = FileAccess::get_file_as_string(pkg_json);
+				int64_t mpos = pkg.find("\"main\"");
+				if (mpos >= 0) {
+					int64_t cpos = pkg.find(":", mpos);
+					if (cpos >= 0) {
+						int64_t q1 = pkg.find("\"", cpos);
+						int64_t q2 = pkg.find("\"", q1 + 1);
+						if (q1 >= 0 && q2 > q1) {
+							main_rel = pkg.substr(q1 + 1, q2 - q1 - 1);
+						}
+					}
+				}
+				if (main_rel.is_empty()) {
+					String idx = base_nm + "/index.js";
+					if (FileAccess::file_exists(idx)) {
+						resolved = idx;
+					} else {
+						resolved = String();
+					}
+				} else {
+					String main_path = base_nm + "/" + main_rel;
+					if (FileAccess::file_exists(main_path)) {
+						resolved = main_path;
+					} else if (FileAccess::file_exists(main_path + ".js")) {
+						resolved = main_path + ".js";
+					} else if (FileAccess::file_exists(main_path + ".json")) {
+						resolved = main_path + ".json";
+					} else {
+						String idx = base_nm + "/index.js";
+						if (FileAccess::file_exists(idx)) {
+							resolved = idx;
+						} else {
+							resolved = String();
+						}
+					}
+				}
+			} else {
+				String idx = base_nm + "/index.js";
+				if (FileAccess::file_exists(idx)) {
+					resolved = idx;
+				} else {
+					resolved = String();
+				}
+			}
+		}
+	}
+	if (resolved.is_empty()) {
+		return Ref<Javascript>();
+	}
+	Ref<Javascript> base_script = ResourceLoader::get_singleton()->load(resolved);
+	return base_script;
 }
 
 StringName Javascript::_get_global_name() const {

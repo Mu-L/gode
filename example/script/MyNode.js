@@ -1,11 +1,13 @@
 const godot = require('godot');
 const isOdd = require('is-odd');
+const BaseClass = require('./BaseClass.js');
 
-class MyNode extends godot.Node2D {
+class MyNode extends BaseClass {
 	_ready() {
 		GD.print("ready");
-		console.log('Is 1 odd?', isOdd(1));
-		console.log('Is 2 odd?', isOdd(2));
+		console.log("base_value: ", this.base_value);
+		GD.print('Is 1 odd?', isOdd(1));
+		GD.print('Is 2 odd?', isOdd(2));
 	}
 }
 
