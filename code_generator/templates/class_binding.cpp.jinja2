@@ -63,6 +63,21 @@ Napi::Function {{ class_name }}Binding::get_class_constructor(Napi::Env env) {
     // Manually attach methods to prototype to avoid InstanceMethod's strict 'this' check
     Napi::Object prototype = func.Get("prototype").As<Napi::Object>();
     
+    // Add properties
+    {% for prop in properties %}
+    {% if prop.getter and prop.setter %}
+    {
+        Napi::PropertyDescriptor descriptor = Napi::PropertyDescriptor::Accessor(
+            "{{ prop.name }}",
+            &{{ class_name }}Binding::{{ prop.getter }},
+            &{{ class_name }}Binding::{{ prop.setter }},
+            napi_default
+        );
+        prototype.DefineProperty(descriptor);
+    }
+    {% endif %}
+    {% endfor %}
+
     // Add toString method
     prototype.Set("toString", Napi::Function::New(env, &{{ class_name }}Binding::_to_string, "toString"));
     prototype.Set(Napi::Symbol::For(env, "nodejs.util.inspect.custom"), Napi::Function::New(env, &{{ class_name }}Binding::_to_string, "inspect"));
@@ -107,6 +122,7 @@ Napi::Value {{ class_name }}Binding::init(Napi::Env env, Napi::Object exports) {
     
     if (instance) {
         internal_object_id = instance->get_instance_id();
+        register_godot_instance(instance, info.This().As<Napi::Object>());
     }
 }
 
@@ -154,13 +170,6 @@ Napi::Value {{ class_name }}Binding::{{ method.name_cpp }}(const Napi::CallbackI
             Napi::Error::New(info.Env(), "Object has been deleted").ThrowAsJavaScriptException();
             return info.Env().Null();
         }
-        // Update instance pointer in case it changed (unlikely for same ID but good practice)
-        // Actually for godot-cpp wrappers, the wrapper might be deleted if we don't hold a reference?
-        // But we hold 'instance' which is a pointer to the wrapper.
-        // Wait, if the underlying object is deleted, the wrapper 'instance' pointer points to valid C++ memory (the wrapper),
-        // but the wrapper's internal GDExtensionObjectPtr is invalid?
-        // godot-cpp wrappers check validity internally? No, they are thin wrappers.
-        // Let's cast obj back to our type.
         binding_instance->instance = godot::Object::cast_to<godot::{{ godot_class_name }}>(obj);
     }
     

@@ -88,14 +88,26 @@ inline void m_name##_internal(godot::m_cpp_type *p_instance, const godot::Varian
 	::godot::gdextension_interface::object_method_bind_call(_gde_method_bind, p_instance->_owner, reinterpret_cast<GDExtensionConstVariantPtr *>(p_args), p_arg_count, nullptr, &error); \
 }
 
+// Helper templates for return value casting
+template<typename T>
+inline T variant_cast(const godot::Variant& v) {
+    return static_cast<T>(v);
+}
+
+// Specialization for Error (enum)
+template<>
+inline godot::Error variant_cast<godot::Error>(const godot::Variant& v) {
+    return (godot::Error)(int64_t)v;
+}
+
 #define DEFINE_CLASS_VARARG_METHOD_RET(m_cpp_type, m_godot_class, m_name, m_hash, m_ret_type) \
 inline m_ret_type m_name##_internal(godot::m_cpp_type *p_instance, const godot::Variant **p_args, GDExtensionInt p_arg_count) { \
 	static GDExtensionMethodBindPtr _gde_method_bind = ::godot::gdextension_interface::classdb_get_method_bind(godot::StringName(#m_godot_class)._native_ptr(), godot::StringName(#m_name)._native_ptr(), m_hash); \
 	CHECK_METHOD_BIND_RET(_gde_method_bind, m_ret_type()); \
 	GDExtensionCallError error; \
-	m_ret_type ret; \
-	::godot::gdextension_interface::object_method_bind_call(_gde_method_bind, p_instance->_owner, reinterpret_cast<GDExtensionConstVariantPtr *>(p_args), p_arg_count, &ret, &error); \
-	return ret; \
+	godot::Variant ret_variant; \
+	::godot::gdextension_interface::object_method_bind_call(_gde_method_bind, p_instance->_owner, reinterpret_cast<GDExtensionConstVariantPtr *>(p_args), p_arg_count, &ret_variant, &error); \
+	return variant_cast<m_ret_type>(ret_variant); \
 }
 
 #define DEFINE_CLASS_STATIC_VARARG_METHOD_VOID(m_cpp_type, m_godot_class, m_name, m_hash) \

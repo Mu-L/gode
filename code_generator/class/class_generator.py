@@ -171,7 +171,7 @@ class ClassGenerator(CodeGenerator):
             for method in methods:
                 method['name_cpp'] = sanitize_method_name(method['name'])
                 if class_name == 'Node' and method['name'] == 'get_node':
-                    method['name_cpp'] = 'get_node_internal'
+                     method['name_cpp'] = 'get_node_internal'
                 
                 # Extract return type from return_value if present
                 if 'return_value' in method:
@@ -231,6 +231,36 @@ class ClassGenerator(CodeGenerator):
                         break
                 current_class = parent
 
+            # Process Properties
+            properties = []
+            for prop in class_def.get('properties', []):
+                 prop_name = prop['name']
+                 prop_type = prop['type']
+                 
+                 # Only handle non-grouped properties for now
+                 if '/' in prop_name:
+                     continue
+                     
+                 getter = prop.get('getter')
+                 setter = prop.get('setter')
+                 
+                 # Verify getter/setter exist in methods
+                 has_getter = False
+                 has_setter = False
+                 
+                 for m in methods:
+                     if m['name'] == getter:
+                         has_getter = True
+                     if m['name'] == setter:
+                         has_setter = True
+                 
+                 if has_getter and has_setter:
+                     properties.append({
+                         'name': prop_name,
+                         'getter': sanitize_method_name(getter),
+                         'setter': sanitize_method_name(setter)
+                     })
+
             context = {
                 'js_class_name': js_class_name,
                 'godot_class_name': godot_class_name,
@@ -250,7 +280,7 @@ class ClassGenerator(CodeGenerator):
                 'dependencies': sorted(list(dependencies)),
                 'enums': class_def.get('enums', []),
                 'constants': class_def.get('constants', []),
-                'properties': class_def.get('properties', []),
+                'properties': properties,
                 'signals': class_def.get('signals', []),
                 'is_singleton': class_name in singletons
             }

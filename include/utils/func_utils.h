@@ -57,6 +57,9 @@ inline Napi::Value call_builtin_method_impl(R (T::*Func)(P...) const, T *instanc
 template <typename R, typename... P>
 inline Napi::Value call_builtin_method(R (*Func)(P...), const Napi::CallbackInfo &info) {
 	std::vector<Napi::Value> args = to_args_array(info);
+	if (args.size() < sizeof...(P)) {
+		args.resize(sizeof...(P), info.Env().Undefined());
+	}
 	return call_builtin_method_impl(Func, info.Env(), args, std::make_index_sequence<sizeof...(P)>());
 }
 
@@ -151,6 +154,9 @@ inline Napi::Value call_builtin_method(R (*Func)(T *, const godot::Variant **, G
 template <typename T, typename R, typename... P>
 inline Napi::Value call_builtin_method(R (T::*Func)(P...), T *instance, const Napi::CallbackInfo &info) {
 	std::vector<Napi::Value> args = to_args_array(info);
+	if (args.size() < sizeof...(P)) {
+		args.resize(sizeof...(P), info.Env().Undefined());
+	}
 	return call_builtin_method_impl(Func, instance, info.Env(), args, std::make_index_sequence<sizeof...(P)>());
 }
 
@@ -158,6 +164,9 @@ inline Napi::Value call_builtin_method(R (T::*Func)(P...), T *instance, const Na
 template <typename T, typename R, typename... P>
 inline Napi::Value call_builtin_method(R (T::*Func)(P...) const, T *instance, const Napi::CallbackInfo &info) {
 	std::vector<Napi::Value> args = to_args_array(info);
+	if (args.size() < sizeof...(P)) {
+		args.resize(sizeof...(P), info.Env().Undefined());
+	}
 	return call_builtin_method_impl(Func, instance, info.Env(), args, std::make_index_sequence<sizeof...(P)>());
 }
 

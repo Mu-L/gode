@@ -10,7 +10,7 @@ config_version=5
 
 [application]
 
-run/main_scene="uid://b854xdq6iakfn"
+run/main_scene="uid://dw6dfmym4yj11"
 config/features=PackedStringArray("4.6")
 
 [physics]
