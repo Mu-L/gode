@@ -356,7 +356,7 @@ class BuiltinClassGenerator(CodeGenerator):
                     if right_type:
                         # Skip if right_type is different from left type (class_name)
                         # UNLESS it is a primitive type (float, int, bool, String) or Variant
-                        primitive_types = ['float', 'int', 'bool', 'String', 'StringName', 'Variant', 'Object']
+                        primitive_types = ['float', 'int', 'bool', 'String', 'StringName', 'Object']
                         if right_type != class_name and right_type not in primitive_types:
                              continue
 
@@ -369,7 +369,7 @@ class BuiltinClassGenerator(CodeGenerator):
                         # Add dependency for right type
                         # We need a mapping from type name to header file
                         # This is usually 'builtin/{snake_case}_binding.gen.h'
-                        if right_type not in ['float', 'int', 'bool', 'String', 'StringName', 'Variant', 'Object']:
+                        if right_type not in ['float', 'int', 'bool', 'String', 'StringName', 'Object']:
                              dependencies.add(f"builtin/{to_snake_case(right_type)}_binding.gen.h")
                         elif right_type == 'Object':
                              dependencies.add(f"classes/object_binding.gen.h")

@@ -158,10 +158,8 @@ Napi::Value {{ class_name }}Binding::operator_{{ op_group.name }}(const Napi::Ca
     godot::{{ class_name }}& instance = binding->instance;
 
     if (info.Length() < 1) {
-        // Check for unary overload
         {% for overload in op_group.overloads %}
         {% if overload.is_unary %}
-        // Unary overload found
         {% if overload.return_type == class_name %}
         godot::{{ class_name }} res = instance.operator {{ overload.cpp_op }}();
         {% else %}
@@ -175,14 +173,9 @@ Napi::Value {{ class_name }}Binding::operator_{{ op_group.name }}(const Napi::Ca
         return info.Env().Null();
     }
     
-    // Dispatch based on argument type
-    // We try to match the most specific type first
-    // Order of overloads matters? JSON usually gives standard types first.
-    
     {% for overload in op_group.overloads %}
     {% if not overload.is_unary %}
     
-    // Type check for {{ overload.arguments[0].type_cpp }}
     {
         bool match = false;
         Napi::Value arg = info[0];
@@ -193,8 +186,6 @@ Napi::Value {{ class_name }}Binding::operator_{{ op_group.name }}(const Napi::Ca
         if (arg.IsBoolean()) match = true;
         {% elif overload.arguments[0].type == 'String' or overload.arguments[0].type == 'StringName' %}
         if (arg.IsString()) match = true;
-        {% elif overload.arguments[0].type == 'Variant' %}
-        match = true;
         {% else %}
         // For Object types, check constructor
         if (arg.IsObject()) {
