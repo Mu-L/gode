@@ -5,6 +5,9 @@
 - `require('godot')` 原生绑定（N-API）
 - `res://` 路径的 `require()`/模块解析与 `fs` 访问适配
 - 自动生成的 Godot API JS 绑定（Node/Resource/UtilityFunctions/Builtin types 等）
+- **操作符重载支持**：内置类型（如 Vector2）支持算术和比较操作（如 `v1.add(v2)`, `v1.equal(v2)`）
+- **信号绑定**：支持信号连接与发射（如 `node.connect("ready", cb)`, `node.signal_name`）
+- **属性访问器**：支持直接读写对象属性（如 `node.name = "new_name"`）
 
 本仓库包含多个子模块：`godot-cpp`、`node-addon-api`、`node`（Node.js 源码）、`tree-sitter`、`tree-sitter-javascript`。
 
@@ -20,14 +23,14 @@ git submodule update --init --recursive
 3. 打开示例工程并运行：
 - 用 Godot 打开 `example/`
 - Project Settings → Plugins 启用 `gode`
-- 直接运行工程（F5），主场景是 [node_2d.tscn](file:///d:/Godot/gode/example/scene/node_2d.tscn#L1-L6)，其脚本是 [MyNode.js](file:///d:/Godot/gode/example/script/MyNode.js)
+- 直接运行工程（F5），主场景是 [node_2d.tscn](example/scene/node_2d.tscn)，其脚本是 [MyNode.js](example/script/MyNode.js)
 
 ## 版本要求
 
-- Godot：示例扩展配置要求 `compatibility_minimum = "4.6.1"`（见 [.gdextension](file:///d:/Godot/gode/example/addons/gode/bin/.gdextension#L1-L9)）
+- Godot：示例扩展配置要求 `compatibility_minimum = "4.6.1"`（见 [.gdextension](example/addons/gode/bin/.gdextension)）
 - CMake：≥ 3.12
-- Python：用于代码生成（见 [code_generator/README.md](file:///d:/Godot/gode/code_generator/README.md)）
-- Windows：当前 CMakeLists 针对 Windows/libnode 的路径做了特殊处理（见 [CMakeLists.txt](file:///d:/Godot/gode/CMakeLists.txt)）
+- Python：用于代码生成（见 [code_generator/README.md](code_generator/README.md)）
+- Windows：当前 CMakeLists 针对 Windows/libnode 的路径做了特殊处理（见 [CMakeLists.txt](CMakeLists.txt)）
 
 ## 构建（Windows / Visual Studio）
 
@@ -39,7 +42,7 @@ git submodule update --init --recursive
 - `node/out/Debug/libnode.lib` 与 `node/out/Debug/libnode.dll`
 - `node/out/Release/libnode.lib` 与 `node/out/Release/libnode.dll`
 
-项目会在构建后自动把 `libnode.dll` 拷贝到 `example/addons/gode/bin/`（见 [CMakeLists.txt](file:///d:/Godot/gode/CMakeLists.txt#L191-L223)）。
+项目会在构建后自动把 `libnode.dll` 拷贝到 `example/addons/gode/bin/${CONFIG}/`（见 [CMakeLists.txt](CMakeLists.txt)）。
 
 ### 2) 生成 VS 工程并编译
 
@@ -49,21 +52,21 @@ cmake --build build --config Debug
 ```
 
 构建完成后会自动把扩展 DLL 拷贝到：
-- `example/addons/gode/bin/libgode.Debug.dll` 或 `libgode.Release.dll`（见 [CMakeLists.txt](file:///d:/Godot/gode/CMakeLists.txt#L225-L231)）
+- `example/addons/gode/bin/Debug/libgode.dll` 或 `bin/Release/libgode.dll`（见 [CMakeLists.txt](CMakeLists.txt)）
 
 ## 运行 example（Godot 编辑器）
 
 ### 1) 确认 .gdextension 指向正确 DLL
 
-示例工程内的扩展描述文件是 [.gdextension](file:///d:/Godot/gode/example/addons/gode/bin/.gdextension#L1-L9)，其中写死了 Debug/Release 的 DLL 路径：
-- `res://addons/gode/bin/libgode.Debug.dll`
-- `res://addons/gode/bin/libgode.Release.dll`
+示例工程内的扩展描述文件是 [.gdextension](example/addons/gode/bin/.gdextension)，其中配置了 Debug/Release 的 DLL 路径：
+- `res://addons/gode/bin/Debug/libgode.dll`
+- `res://addons/gode/bin/Release/libgode.dll`
 
 只要你按上面的 CMake 构建，POST_BUILD 会自动把产物拷贝到这个目录，一般不需要手动改。
 
 ### 2) 安装 JS 依赖（可选）
 
-示例脚本 [MyNode.js](file:///d:/Godot/gode/example/script/MyNode.js#L1-L15) 使用了 `is-odd`：
+示例脚本 [MyNode.js](example/script/MyNode.js) 使用了 `is-odd`：
 - 如果 `example/node_modules/` 已存在（仓库可能已带），可跳过
 - 如果没有，请在 `example/` 下执行：
 
@@ -73,10 +76,53 @@ npm install
 
 ### 3) 启用插件与运行
 
-1. 用 Godot 打开 `example/` 工程（[project.godot](file:///d:/Godot/gode/example/project.godot#L1-L22)）。
-2. Project Settings → Plugins 启用 `gode`（[plugin.cfg](file:///d:/Godot/gode/example/addons/gode/plugin.cfg#L1-L7)）。
-3. 插件会添加一个 Autoload 单例 `EventLoop`（见 [gode.gd](file:///d:/Godot/gode/example/addons/gode/gode.gd#L1-L22) 与 [event_loop.gd](file:///d:/Godot/gode/example/addons/gode/script/event_loop.gd#L1-L1)）。
-4. 运行工程（F5）。主场景为 [node_2d.tscn](file:///d:/Godot/gode/example/scene/node_2d.tscn#L1-L6)，挂载脚本为 `res://script/MyNode.js`。
+1. 用 Godot 打开 `example/` 工程（[project.godot](example/project.godot)）。
+2. Project Settings → Plugins 启用 `gode`（[plugin.cfg](example/addons/gode/plugin.cfg)）。
+3. 插件会添加一个 Autoload 单例 `EventLoop`（见 [gode.gd](example/addons/gode/gode.gd) 与 [event_loop.gd](example/addons/gode/script/event_loop.gd)）。
+4. 运行工程（F5）。主场景为 [node_2d.tscn](example/scene/node_2d.tscn)，挂载脚本为 `res://script/MyNode.js`。
+
+## 功能示例
+
+### 操作符重载
+
+内置类型（如 `Vector2`, `Color`）支持类似 C++ 的操作符：
+
+```javascript
+let v1 = new Vector2(1, 2);
+let v2 = new Vector2(3, 4);
+
+// 算术运算
+let v3 = v1.add(v2);      // (4, 6)
+let v4 = v1.subtract(v2); // (-2, -2)
+let v5 = v1.multiply(2);  // (2, 4)
+let v6 = v1.multiply(v2); // (3, 8)
+
+// 比较运算
+if (v1.not_equal(v2)) {
+    console.log("Vectors are different");
+}
+```
+
+### 信号与属性
+
+```javascript
+// 属性访问器
+let node = new Node();
+node.name = "MyNode"; // 自动调用 set_name
+console.log(node.name); // 自动调用 get_name
+
+// 信号连接
+node.connect("renamed", () => {
+    console.log("Node renamed!");
+});
+
+// 或者使用信号对象属性
+node.renamed.connect(() => {
+    console.log("Node renamed via signal object!");
+});
+
+node.name = "NewName"; // 触发信号
+```
 
 ## JavaScript / res:// 模块加载机制
 
@@ -85,7 +131,7 @@ npm install
 - `fs.readFileSync('res://...')` / `fs.existsSync('res://...')` / `fs.statSync('res://...')` 走 Godot 侧文件接口
 - `require('./x')`、`require('pkg')` 在 `res://` 场景下具备类似 Node 的解析规则（扩展名、package.json main、index.js、node_modules 向上查找）
 
-对应实现集中在 [node_runtime.cpp](file:///d:/Godot/gode/src/utils/node_runtime.cpp#L148-L427)：
+对应实现集中在 [node_runtime.cpp](src/utils/node_runtime.cpp)：
 - 注入 `godot` 模块到 `Module._cache`
 - 重写 `fs.readFileSync/existsSync/statSync`
 - 重写 `path.join/resolve/dirname` 以兼容 `res://`
@@ -98,7 +144,7 @@ npm install
 - `include/generated/**`
 - `src/generated/**`
 
-使用方法见 [code_generator/README.md](file:///d:/Godot/gode/code_generator/README.md)。
+使用方法见 [code_generator/README.md](code_generator/README.md)。
 
 常用命令：
 ```bash
@@ -125,7 +171,7 @@ python code_generator/generator.py
 - `JavascriptInstance` 析构中会 `Reset()` 掉 `Napi::ObjectReference`，解除 C++→JS 的强引用，随后 JS 对象可被 GC
 
 相关实现见：
-- [javascript_instance.cpp](file:///d:/Godot/gode/src/support/javascript/javascript_instance.cpp)
+- [javascript_instance.cpp](src/support/javascript/javascript_instance.cpp)
 
 ## 目录结构（简要）
 
