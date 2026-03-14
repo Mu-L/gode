@@ -177,9 +177,36 @@ String JavascriptInstance::to_string(bool &r_is_valid) const {
 		r_is_valid = true;
 		return "JavascriptInstance(Placeholder)";
 	}
-	// TODO: Call toString() on js_instance if available?
-	r_is_valid = false;
-	return String();
+	if (js_instance.IsEmpty()) {
+		r_is_valid = false;
+		return String();
+	}
+	v8::Locker locker(NodeRuntime::isolate);
+	v8::Isolate::Scope isolate_scope(NodeRuntime::isolate);
+	Napi::HandleScope scope(JsEnvManager::get_env());
+	Napi::Object obj = js_instance.Value();
+	// Call JS toString() only if the class defines its own (not the inherited Object.prototype.toString)
+	Napi::Value proto_val = obj.Get("__proto__");
+	if (proto_val.IsObject()) {
+		Napi::Object proto = proto_val.As<Napi::Object>();
+		if (proto.HasOwnProperty("toString")) {
+			Napi::Value ts_val = proto.Get("toString");
+			if (ts_val.IsFunction()) {
+				Napi::Value result = ts_val.As<Napi::Function>().Call(obj, {});
+				if (result.IsString()) {
+					r_is_valid = true;
+					return String(result.As<Napi::String>().Utf8Value().c_str());
+				}
+			}
+		}
+	}
+	// Fallback: "<ClassName>:<instance_id>"
+	r_is_valid = true;
+	String cls_name = String(javascript->_get_global_name());
+	if (cls_name.is_empty()) {
+		cls_name = "JavascriptInstance";
+	}
+	return cls_name + ":" + String::num_int64(owner ? owner->get_instance_id() : 0);
 }
 
 bool JavascriptInstance::property_can_revert(const StringName &p_name) const {
