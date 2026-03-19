@@ -1,7 +1,8 @@
 #include "support/javascript/javascript_instance_info.h"
-#include "godot_cpp/core/memory.hpp"
+#include "support/javascript/javascript.h"
 #include "support/javascript/javascript_instance.h"
 #include "support/javascript/javascript_language.h"
+#include <godot_cpp/core/memory.hpp>
 
 using namespace godot;
 

@@ -1,6 +1,8 @@
 #include "support/typescript/typescript.h"
 #include "support/typescript/typescript_language.h"
 #include "utils/node_runtime.h"
+#include "utils/value_convert.h"
+
 #include <tree_sitter/api.h>
 #include <v8-isolate.h>
 #include <v8-locker.h>

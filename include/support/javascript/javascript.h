@@ -71,6 +71,8 @@ public:
 	bool _is_valid() const;
 	bool _is_abstract() const;
 	godot::ScriptLanguage *_get_language() const;
+	godot::ScriptLanguage *get_script_language() const;
+	godot::StringName get_global_name() const;
 	bool _has_script_signal(const godot::StringName &p_signal) const;
 	godot::TypedArray<godot::Dictionary> _get_script_signal_list() const;
 	bool _has_property_default_value(const godot::StringName &p_property) const;

@@ -20,8 +20,6 @@ class JavascriptInstance {
 	mutable std::vector<godot::PropertyInfo> prop_list_cache;
 	mutable std::vector<GDExtensionPropertyInfo> prop_list_gde;
 
-	friend class JavascriptInstanceInfo;
-
 public:
 	JavascriptInstance(const godot::Ref<Javascript> &p_javascript, godot::Object *p_owner, bool p_placeholder);
 	~JavascriptInstance();
