@@ -1,11 +1,9 @@
 #ifndef GODOT_JAVASCRIPT_INSTANCE_H
 #define GODOT_JAVASCRIPT_INSTANCE_H
 
-#include "script_module.h"
 #include <napi.h>
 #include <vector>
 #include <godot_cpp/classes/ref.hpp>
-#include <godot_cpp/classes/script.hpp>
 #include <godot_cpp/templates/hash_map.hpp>
 
 namespace gode {
@@ -13,24 +11,19 @@ namespace gode {
 class Javascript;
 
 class JavascriptInstance {
-	IScriptModule *module = nullptr;
-	godot::Ref<godot::Script> script;
+	godot::Ref<Javascript> javascript;
 	godot::Object *owner = nullptr;
 	Napi::ObjectReference js_instance;
 	bool placeholder = false;
 	godot::HashMap<godot::StringName, godot::Variant> placeholder_properties;
 
-	// Caches for get_property_list — keeps StringName/String alive while the GDExtension array is in use
 	mutable std::vector<godot::PropertyInfo> prop_list_cache;
 	mutable std::vector<GDExtensionPropertyInfo> prop_list_gde;
 
 	friend class JavascriptInstanceInfo;
 
-private:
-	bool compile_module();
-
 public:
-	JavascriptInstance(IScriptModule *p_module, godot::Ref<godot::Script> p_script, godot::Object *p_owner, bool p_placeholder);
+	JavascriptInstance(const godot::Ref<Javascript> &p_javascript, godot::Object *p_owner, bool p_placeholder);
 	~JavascriptInstance();
 
 	godot::Object *get_owner() const;
@@ -53,8 +46,7 @@ public:
 	void get_method_list(const GDExtensionMethodInfo *&r_list, uint32_t &r_count) const;
 	void free_method_list(const GDExtensionMethodInfo *p_list) const;
 
-	godot::Ref<godot::Script> get_script() const;
-	IScriptModule *get_module() const;
+	godot::Ref<Javascript> get_script() const;
 };
 } // namespace gode
 

@@ -2,7 +2,6 @@
 #define GODOT_GODE_JAVASCRIPT_H
 
 #include "javascript_instance.h"
-#include "script_module.h"
 
 #include <napi.h>
 #include <godot_cpp/classes/script_extension.hpp>
@@ -14,7 +13,7 @@ namespace gode {
 
 class JavascriptInstance;
 
-class Javascript : public godot::ScriptExtension, public IScriptModule {
+class Javascript : public godot::ScriptExtension {
 	GDCLASS(Javascript, godot::ScriptExtension)
 
 protected:
@@ -22,7 +21,6 @@ protected:
 	mutable bool is_valid = false;
 	godot::String source_code;
 
-	// Metadata cache
 	mutable godot::StringName class_name;
 	mutable godot::StringName base_class_name;
 	mutable godot::HashMap<godot::StringName, godot::MethodInfo> methods;
@@ -32,22 +30,17 @@ protected:
 	mutable godot::HashMap<godot::StringName, godot::Variant> constants;
 	mutable godot::HashMap<godot::StringName, int> member_lines;
 
-	// Napi objects
 	mutable Napi::FunctionReference default_class;
 
 	mutable godot::HashSet<JavascriptInstance *> instances;
 	mutable godot::HashSet<JavascriptInstance *> placeholder_instances;
 	mutable godot::HashSet<godot::Object *> instance_objects;
+
 public:
-	virtual bool compile() const override;
-	Napi::Function get_default_class() const override;
-	const godot::HashMap<godot::StringName, godot::PropertyInfo> &get_exported_properties() const override { return properties; }
-	const godot::HashMap<godot::StringName, godot::Variant> &get_property_defaults() const override { return property_defaults; }
-	godot::ScriptLanguage *get_script_language() const override;
-	bool _has_method(const godot::StringName &p_method) const override;
-	bool _has_property_default_value(const godot::StringName &p_property) const override;
-	godot::Variant _get_property_default_value(const godot::StringName &p_property) const override;
-	godot::StringName get_global_name() const override;
+	virtual bool compile() const;
+	Napi::Function get_default_class() const;
+	const godot::HashMap<godot::StringName, godot::PropertyInfo> &get_exported_properties() const { return properties; }
+	const godot::HashMap<godot::StringName, godot::Variant> &get_property_defaults() const { return property_defaults; }
 
 protected:
 	static void _bind_methods();
@@ -70,6 +63,7 @@ public:
 	godot::StringName _get_doc_class_name() const;
 	godot::TypedArray<godot::Dictionary> _get_documentation() const;
 	godot::String _get_class_icon_path() const;
+	bool _has_method(const godot::StringName &p_method) const;
 	bool _has_static_method(const godot::StringName &p_method) const;
 	godot::Variant _get_script_method_argument_count(const godot::StringName &p_method) const;
 	godot::Dictionary _get_method_info(const godot::StringName &p_method) const;
@@ -79,6 +73,8 @@ public:
 	godot::ScriptLanguage *_get_language() const;
 	bool _has_script_signal(const godot::StringName &p_signal) const;
 	godot::TypedArray<godot::Dictionary> _get_script_signal_list() const;
+	bool _has_property_default_value(const godot::StringName &p_property) const;
+	godot::Variant _get_property_default_value(const godot::StringName &p_property) const;
 	void _update_exports();
 	godot::TypedArray<godot::Dictionary> _get_script_method_list() const;
 	godot::TypedArray<godot::Dictionary> _get_script_property_list() const;

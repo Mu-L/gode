@@ -398,18 +398,16 @@ StringName Javascript::_get_instance_base_type() const {
 }
 
 void *Javascript::_instance_create(Object *p_for_object) const {
-	Ref<Script> self(const_cast<Javascript *>(this));
-	IScriptModule *module = const_cast<Javascript *>(this);
-	JavascriptInstance *instance = memnew(JavascriptInstance(module, self, p_for_object, false));
+	Ref<Javascript> self(const_cast<Javascript *>(this));
+	JavascriptInstance *instance = memnew(JavascriptInstance(self, p_for_object, false));
 	instances.insert(instance);
 	instance_objects.insert(p_for_object);
 	return gdextension_interface::script_instance_create3(&javascript_instance_info, instance);
 }
 
 void *Javascript::_placeholder_instance_create(Object *p_for_object) const {
-	Ref<Script> self(const_cast<Javascript *>(this));
-	IScriptModule *module = const_cast<Javascript *>(this);
-	JavascriptInstance *instance = memnew(JavascriptInstance(module, self, p_for_object, true));
+	Ref<Javascript> self(const_cast<Javascript *>(this));
+	JavascriptInstance *instance = memnew(JavascriptInstance(self, p_for_object, true));
 	placeholder_instances.insert(instance);
 	return gdextension_interface::script_instance_create3(&javascript_instance_info, instance);
 }
