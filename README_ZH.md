@@ -192,6 +192,13 @@ python code_generator/generator.py
 相关实现见：
 - [javascript_instance.cpp](src/support/javascript/javascript_instance.cpp)
 
+## 贡献指南
+
+欢迎提交 Pull Request。请注意以下事项：
+
+- **不要使用 AI 工具（如 Claude、Copilot）直接代劳提交代码。**
+  AI 代劳提交的 commit 通常会在提交信息中附带 `Co-Authored-By: Claude` 等字样，导致 AI 工具作为共同作者出现在 git 历史中。如果你使用 AI 辅助编写代码，这完全没问题——但最终提交时，请确保 commit 仅由你本人署名，不含任何 AI 共同作者标记。
+
 ## 目录结构（简要）
 
 - `src/` / `include/`：扩展主体

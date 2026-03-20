@@ -191,7 +191,14 @@ When a Godot object with JS Script is `queue_free()`'d:
 
 Related implementation: [javascript_instance.cpp](src/support/javascript/javascript_instance.cpp)
 
-## Directory Structure (Brief)
+## Contributing
+
+Pull requests are welcome. Please keep the following in mind:
+
+- **Do not use AI assistants (e.g. Claude, Copilot) to commit code on your behalf.**
+  AI-generated commits often include `Co-Authored-By: Claude` or similar lines in the commit message, which adds AI tools as co-authors in the git history. If you used an AI to help write code, that is fine — just make sure the final commit is authored by you alone, without any AI co-author trailer.
+
+
 
 - `src/` / `include/`: Extension core
 - `src/generated/` / `include/generated/`: Auto-generated binding code
