@@ -63,7 +63,7 @@ if exist "%TSCONFIG%" (
         echo     "module": "ESNext",
         echo     "moduleResolution": "bundler",
         echo     "strict": false,
-        echo     "noCheck": true,
+        echo     "noCheck": false,
         echo     "outDir": "dist",
         echo     "rootDir": ".",
         echo     "esModuleInterop": true,

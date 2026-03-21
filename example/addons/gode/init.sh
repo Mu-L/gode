@@ -62,7 +62,7 @@ else
     "module": "ESNext",
     "moduleResolution": "bundler",
     "strict": false,
-    "noCheck": true,
+    "noCheck": false,
     "outDir": "dist",
     "rootDir": ".",
     "esModuleInterop": true,
