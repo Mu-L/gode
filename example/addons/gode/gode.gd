@@ -5,12 +5,10 @@ var _init_button: Button
 
 
 func _enable_plugin() -> void:
-	add_autoload_singleton("EventLoop", "res://addons/gode/script/event_loop.gd")
-
+	pass
 
 func _disable_plugin() -> void:
-	remove_autoload_singleton("EventLoop")
-
+	pass
 
 func _enter_tree() -> void:
 	add_autoload_singleton("EventLoop", "res://addons/gode/script/event_loop.gd")

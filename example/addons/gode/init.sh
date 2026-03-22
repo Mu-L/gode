@@ -12,16 +12,12 @@ PROJECT_DIR="${1:-$(pwd)}"
 
 echo "Initializing gode project in: $PROJECT_DIR"
 
-# SCRIPT_DIR = addons/gode/ (init.sh lives inside the plugin folder)
 ADDON_SRC="$SCRIPT_DIR"
 ADDON_DST="$PROJECT_DIR/addons/gode"
-
-# ── 1. Copy addons/gode (skip if already in place) ───────────────────────────
 
 if [ "$(realpath "$ADDON_SRC")" = "$(realpath "$ADDON_DST" 2>/dev/null || echo "")" ]; then
   echo "Already running inside target project, skipping addon copy"
 else
-  # Detect build config from source addon
   if [ -f "$ADDON_SRC/bin/Release/libgode.dll" ] || [ -f "$ADDON_SRC/bin/Release/libgode.so" ]; then
     BUILD_CONFIG="Release"
   elif [ -f "$ADDON_SRC/bin/Debug/libgode.dll" ] || [ -f "$ADDON_SRC/bin/Debug/libgode.so" ]; then
@@ -48,8 +44,6 @@ else
 
   echo "Copied addons/gode ($BUILD_CONFIG)"
 fi
-
-# ── 2. Create tsconfig.json ───────────────────────────────────────────────────
 
 TSCONFIG="$PROJECT_DIR/tsconfig.json"
 if [ -f "$TSCONFIG" ]; then
@@ -79,8 +73,6 @@ EOF
   echo "Created tsconfig.json"
 fi
 
-# ── 3. Create package.json ────────────────────────────────────────────────────
-
 PKGJSON="$PROJECT_DIR/package.json"
 if [ -f "$PKGJSON" ]; then
   echo "package.json already exists, skipping"
@@ -106,14 +98,10 @@ EOF
   echo "Created package.json"
 fi
 
-# ── 4. Install npm dependencies ───────────────────────────────────────────────
-
 echo "Installing npm dependencies..."
 cd "$PROJECT_DIR"
 npm install
 echo "npm install done"
-
-# ── 5. Create .gitignore entries ──────────────────────────────────────────────
 
 GITIGNORE="$PROJECT_DIR/.gitignore"
 if ! grep -q "node_modules" "$GITIGNORE" 2>/dev/null; then

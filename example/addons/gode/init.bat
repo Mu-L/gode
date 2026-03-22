@@ -16,8 +16,6 @@ echo Initializing gode project in: %PROJECT_DIR%
 set "ADDON_SRC=%SCRIPT_DIR%"
 set "ADDON_DST=%PROJECT_DIR%\addons\gode"
 
-:: ── 1. Copy addons/gode (skip if already in place) ───────────────────────────
-
 if /i "%ADDON_SRC%"=="%ADDON_DST%" (
     echo Already running inside target project, skipping addon copy
     goto :skip_copy
@@ -50,8 +48,6 @@ echo Copied addons\gode (%BUILD_CONFIG%)
 
 :skip_copy
 
-:: ── 2. Create tsconfig.json ───────────────────────────────────────────────────
-
 set "TSCONFIG=%PROJECT_DIR%\tsconfig.json"
 if exist "%TSCONFIG%" (
     echo tsconfig.json already exists, skipping
@@ -80,8 +76,6 @@ if exist "%TSCONFIG%" (
     echo Created tsconfig.json
 )
 
-:: ── 3. Create package.json ────────────────────────────────────────────────────
-
 set "PKGJSON=%PROJECT_DIR%\package.json"
 if exist "%PKGJSON%" (
     echo package.json already exists, skipping
@@ -107,14 +101,10 @@ if exist "%PKGJSON%" (
     echo Created package.json
 )
 
-:: ── 4. Install npm dependencies ───────────────────────────────────────────────
-
 echo Installing npm dependencies...
 cd /d "%PROJECT_DIR%"
 call npm install
 echo npm install done
-
-:: ── 5. Create .gitignore entries ──────────────────────────────────────────────
 
 set "GITIGNORE=%PROJECT_DIR%\.gitignore"
 findstr /c:"node_modules" "%GITIGNORE%" >nul 2>nul || (
