@@ -11,6 +11,55 @@ using namespace godot;
 
 namespace gode {
 
+namespace {
+
+constexpr const char *CPP_BINDING_PROTO_MARKER = "__gode.cpp_binding__";
+constexpr const char *PROTO_PROP_NAME = "__proto__";
+
+bool _is_cpp_binding_prototype(const Napi::Object &p_proto, const Napi::Symbol &p_marker_symbol) {
+	if (!p_proto.HasOwnProperty(p_marker_symbol)) {
+		return false;
+	}
+
+	Napi::Value marker_value = p_proto.Get(p_marker_symbol);
+	if (marker_value.IsBoolean()) {
+		return marker_value.As<Napi::Boolean>().Value();
+	}
+	return !marker_value.IsNull() && !marker_value.IsUndefined();
+}
+
+bool _find_script_method_from_prototype_chain(const Napi::Object &p_instance, const std::string &p_method_name, Napi::Function *r_method = nullptr) {
+	Napi::Env env = p_instance.Env();
+	Napi::Symbol marker_symbol = Napi::Symbol::For(env, CPP_BINDING_PROTO_MARKER);
+
+	Napi::Value proto_val = p_instance.Get(PROTO_PROP_NAME);
+	while (proto_val.IsObject()) {
+		Napi::Object proto = proto_val.As<Napi::Object>();
+
+		// Stop before entering generated C++ binding prototypes.
+		if (_is_cpp_binding_prototype(proto, marker_symbol)) {
+			return false;
+		}
+
+		if (proto.HasOwnProperty(p_method_name)) {
+			Napi::Value method_val = proto.Get(p_method_name);
+			if (!method_val.IsFunction()) {
+				return false;
+			}
+			if (r_method != nullptr) {
+				*r_method = method_val.As<Napi::Function>();
+			}
+			return true;
+		}
+
+		proto_val = proto.Get(PROTO_PROP_NAME);
+	}
+
+	return false;
+}
+
+} // namespace
+
 JavascriptInstance::JavascriptInstance(const Ref<Javascript> &p_javascript, Object *p_owner, bool p_placeholder) :
 		javascript(p_javascript),
 		owner(p_owner),
@@ -62,7 +111,11 @@ bool JavascriptInstance::set(const StringName &p_name, const Variant &p_value) {
 	v8::Locker locker(NodeRuntime::isolate);
 	v8::Isolate::Scope isolate_scope(NodeRuntime::isolate);
 	v8::HandleScope handle_scope(NodeRuntime::isolate);
-	return js_instance.Set(String(p_name).utf8().get_data(), godot_to_napi(JsEnvManager::get_env(), p_value));
+	std::string property_name = String(p_name).utf8().get_data();
+	if (js_instance.Value().HasOwnProperty(property_name)) {
+		return js_instance.Set(property_name, godot_to_napi(JsEnvManager::get_env(), p_value));
+	}
+	return false;
 }
 
 bool JavascriptInstance::get(const StringName &p_name, Variant &r_value) const {
@@ -101,17 +154,9 @@ bool JavascriptInstance::has_method(const StringName &p_method) const {
 	v8::Locker locker(NodeRuntime::isolate);
 	v8::HandleScope scope(NodeRuntime::isolate);
 	v8::Isolate::Scope isolate_scope(NodeRuntime::isolate);
-	Napi::Function cls = javascript->get_default_class();
-	if (cls.IsEmpty() || !cls.IsFunction()) {
-		return false;
-	}
-	Napi::Value proto_val = cls.Get("prototype");
-	if (!proto_val.IsObject()) {
-		return false;
-	}
-	Napi::Object proto = proto_val.As<Napi::Object>();
+	Napi::Object instance = js_instance.Value();
 	std::string method_name = String(p_method).utf8().get_data();
-	return proto.HasOwnProperty(method_name) && proto.Get(method_name).IsFunction();
+	return _find_script_method_from_prototype_chain(instance, method_name);
 }
 
 int32_t JavascriptInstance::get_method_argument_count(const StringName &p_method, bool &r_is_valid) const {
@@ -127,11 +172,6 @@ Variant JavascriptInstance::call(const StringName &p_method, const Variant *p_ar
 		return Variant();
 	}
 
-	if (!javascript->_is_tool() && Engine::get_singleton()->is_editor_hint()) {
-		r_error.error = GDExtensionCallErrorType::GDEXTENSION_CALL_ERROR_INVALID_METHOD;
-		return Variant();
-	}
-
 	if (js_instance.IsEmpty()) {
 		r_error.error = GDEXTENSION_CALL_ERROR_INSTANCE_IS_NULL;
 		return Variant();
@@ -143,21 +183,16 @@ Variant JavascriptInstance::call(const StringName &p_method, const Variant *p_ar
 	Napi::Object instance = js_instance.Value();
 	std::string method_name = String(p_method).utf8().get_data();
 
-	if (!instance.Has(method_name)) {
+	Napi::Function method;
+	if (!_find_script_method_from_prototype_chain(instance, method_name, &method)) {
 		r_error.error = GDEXTENSION_CALL_ERROR_INVALID_METHOD;
 		return Variant();
 	}
 
-	Napi::Value method_val = instance.Get(method_name);
-	if (!method_val.IsFunction()) {
-		r_error.error = GDEXTENSION_CALL_ERROR_INVALID_METHOD;
-		return Variant();
-	}
-
-	Napi::Function method = method_val.As<Napi::Function>();
 	std::vector<napi_value> args;
 	for (int i = 0; i < p_argcount; ++i) {
-		args.push_back(godot_to_napi(JsEnvManager::get_env(), p_args[i]));
+		Napi::Value jsvalue = godot_to_napi(JsEnvManager::get_env(), p_args[i]);
+		args.push_back(jsvalue);
 	}
 
 	Napi::Value result = method.Call(instance, args);

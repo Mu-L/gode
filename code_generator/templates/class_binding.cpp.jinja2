@@ -62,6 +62,8 @@ Napi::Function {{ class_name }}Binding::get_class_constructor(Napi::Env env) {
 
     // Manually attach methods to prototype to avoid InstanceMethod's strict 'this' check
     Napi::Object prototype = func.Get("prototype").As<Napi::Object>();
+    // Mark generated C++ binding prototypes so script method lookup can stop before entering bindings.
+    prototype.Set(Napi::Symbol::For(env, "__gode.cpp_binding__"), Napi::Boolean::New(env, true));
     // Add signals
     {% for signal in signals %}
     {
@@ -144,7 +146,7 @@ Napi::Value {{ class_name }}Binding::init(Napi::Env env, Napi::Object exports) {
         if (obj) {
             godot::Node* node = godot::Object::cast_to<godot::Node>(obj);
             if (node && !node->is_inside_tree()) {
-                node->queue_free();
+            	godot::memdelete(node);
             }
         }
     }

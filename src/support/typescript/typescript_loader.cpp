@@ -79,7 +79,6 @@ Variant TypescriptLoader::_load(const String &p_path, const String &p_original_p
 	String source_code = FileAccess::get_file_as_string(p_original_path);
 	Typescript *script = memnew(Typescript);
 	script->_set_source_code(source_code);
-	script->set_path(p_original_path);
 	scripts[p_path] = Ref(script);
 	return script;
 }

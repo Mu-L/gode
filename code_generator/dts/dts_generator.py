@@ -9,15 +9,61 @@ PRIMITIVE_MAP = {
     'int':        'number',
     'float':      'number',
     'Nil':        'null',
-    'Variant':    'Variant',
     'Object':     'GodotObject',
     'String':     'string',
     'StringName': 'string',
     'NodePath':   'string',
 }
 
+# JS-facing collection types used for return values.
+JS_ARRAY_TYPE = 'VariantArgument[]'
+JS_OBJECT_TYPE = '{ [key: string]: VariantArgument }'
+
+# Variant.Type id -> Godot type name, used by typedarray encoded forms like "typedarray::27/0:"
+VARIANT_TYPE_ID_MAP = {
+    '0': 'Nil',
+    '1': 'bool',
+    '2': 'int',
+    '3': 'float',
+    '4': 'String',
+    '5': 'Vector2',
+    '6': 'Vector2i',
+    '7': 'Rect2',
+    '8': 'Rect2i',
+    '9': 'Vector3',
+    '10': 'Vector3i',
+    '11': 'Transform2D',
+    '12': 'Vector4',
+    '13': 'Vector4i',
+    '14': 'Plane',
+    '15': 'Quaternion',
+    '16': 'AABB',
+    '17': 'Basis',
+    '18': 'Transform3D',
+    '19': 'Projection',
+    '20': 'Color',
+    '21': 'StringName',
+    '22': 'NodePath',
+    '23': 'RID',
+    '24': 'Object',
+    '25': 'Callable',
+    '26': 'Signal',
+    '27': 'Dictionary',
+    '28': 'Array',
+    '29': 'PackedByteArray',
+    '30': 'PackedInt32Array',
+    '31': 'PackedInt64Array',
+    '32': 'PackedFloat32Array',
+    '33': 'PackedFloat64Array',
+    '34': 'PackedStringArray',
+    '35': 'PackedVector2Array',
+    '36': 'PackedVector3Array',
+    '37': 'PackedColorArray',
+    '38': 'PackedVector4Array',
+}
+
 # Builtin classes that map directly to JS primitives — skip class generation
-SKIP_BUILTINS = frozenset(['Nil', 'void', 'bool', 'int', 'float', 'Variant'])
+SKIP_BUILTINS = frozenset(['Nil', 'void', 'bool', 'int', 'float'])
 
 # Global enums to skip — already represented in the hand-crafted Variant class
 SKIP_GLOBAL_ENUMS = frozenset(['Variant.Type', 'Variant.Operator'])
@@ -49,6 +95,55 @@ def sanitize_name(name: str) -> str:
     return name
 
 
+def parse_typedarray_element_type(type_str: str) -> str:
+    """
+    Parse typedarray forms from extension_api.json:
+      - typedarray::Node
+      - typedarray::int
+      - typedarray::24/17:CompositorEffect
+      - typedarray::27/0:
+    Returns a Godot type token for the element.
+    """
+    payload = type_str[len('typedarray::'):]
+    if not payload:
+        return 'Variant'
+
+    if ':' in payload:
+        meta, explicit = payload.split(':', 1)
+        if explicit:
+            payload = explicit
+        else:
+            payload = meta
+
+    if '/' in payload:
+        maybe_variant_id = payload.split('/', 1)[0]
+        payload = VARIANT_TYPE_ID_MAP.get(maybe_variant_id, payload)
+
+    payload = payload.strip().lstrip('-')
+    return payload or 'Variant'
+
+
+def parse_typeddictionary_types(type_str: str) -> tuple[str, str]:
+    """
+    Parse typeddictionary forms from extension_api.json:
+      - typeddictionary::int;String
+      - typeddictionary::Color;Color
+    Returns a pair of Godot type tokens: (key_type, value_type).
+    """
+    payload = type_str[len('typeddictionary::'):].strip()
+    if not payload:
+        return 'Variant', 'Variant'
+
+    if ';' not in payload:
+        t = payload.lstrip('-') or 'Variant'
+        return t, 'Variant'
+
+    key_type, value_type = payload.split(';', 1)
+    key_type = key_type.strip().lstrip('-') or 'Variant'
+    value_type = value_type.strip().lstrip('-') or 'Variant'
+    return key_type, value_type
+
+
 def godot_type_to_ts(type_str: str, is_input: bool = False) -> str:
     if not type_str:
         return 'void'
@@ -59,7 +154,21 @@ def godot_type_to_ts(type_str: str, is_input: bool = False) -> str:
         return ' | '.join(godot_type_to_ts(t.strip().lstrip('-'), is_input) for t in type_str.split(','))
 
     if type_str == 'Variant':
-        return 'VariantArgument' if is_input else 'Variant'
+        return 'VariantArgument'  # Treat Variant as any type since we removed the binding
+
+    # Handle Variant.Type enum specially
+    if type_str == 'Variant.Type':
+        return 'VariantType'
+
+    # Handle Variant.Operator enum specially
+    if type_str == 'Variant.Operator':
+        return 'VariantOperator'
+
+    if type_str == 'Callable' and is_input:
+        return 'Callable | Function'
+
+    if is_input and type_str in ('String', 'GDString', 'StringName'):
+        return 'GDString | StringName | string'
 
     if type_str in PRIMITIVE_MAP:
         return PRIMITIVE_MAP[type_str]
@@ -68,6 +177,11 @@ def godot_type_to_ts(type_str: str, is_input: bool = False) -> str:
         inner = type_str[6:]
         if '.' in inner:
             cls, enum = inner.split('.', 1)
+            # Handle special cases for Variant enums
+            if cls == 'Variant' and enum == 'Type':
+                return 'VariantType'
+            if cls == 'Variant' and enum == 'Operator':
+                return 'VariantOperator'
             return f'{RENAME_MAP.get(cls, cls)}.{enum}'
         return inner  # global enum name
 
@@ -79,13 +193,39 @@ def godot_type_to_ts(type_str: str, is_input: bool = False) -> str:
         return 'number'
 
     if type_str.startswith('typedarray::'):
-        return 'GDArray'
+        element_type = parse_typedarray_element_type(type_str)
+        # typedarray is always represented as a JS generic array on the TypeScript side.
+        element_ts = godot_type_to_ts(element_type, is_input=False)
+        typed_array = f'Array<{element_ts}>'
+        return f'GDArray | {typed_array}' if is_input else typed_array
 
     if type_str.startswith('typeddictionary::'):
-        return 'GDDictionary'
+        key_type, value_type = parse_typeddictionary_types(type_str)
+        key_ts = godot_type_to_ts(key_type, is_input=False)
+        value_ts = godot_type_to_ts(value_type, is_input=False)
+
+        # JS object literals can only model PropertyKey keys precisely.
+        if key_ts in ('string', 'number', 'symbol'):
+            typed_container = f'Record<{key_ts}, {value_ts}>'
+        else:
+            typed_container = f'Map<{godot_type_to_ts(key_type, is_input=True)}, {value_ts}>'
+
+        return f'GDDictionary | {typed_container}' if is_input else typed_container
 
     if type_str.endswith('*'):
         return godot_type_to_ts(type_str[:-1], is_input)
+
+    if is_input and type_str in ('Dictionary', 'GDDictionary'):
+        return f'GDDictionary | {JS_OBJECT_TYPE}'
+
+    if is_input and type_str in ('Array', 'GDArray'):
+        return f'GDArray | {JS_ARRAY_TYPE}'
+
+    if not is_input and type_str == 'Array':
+        return JS_ARRAY_TYPE
+
+    if not is_input and type_str in ('Dictionary', 'GDDictionary'):
+        return JS_OBJECT_TYPE
 
     return RENAME_MAP.get(type_str, type_str)
 
@@ -99,20 +239,27 @@ class DtsGenerator(CodeGenerator):
 
         api_path   = os.path.join(project_root, 'godot-cpp', 'gdextension', 'extension_api.json')
         output_dir = os.path.join(project_root, 'example', 'addons', 'gode', 'core')
-        output_path = os.path.join(output_dir, 'godot.d.ts')
+        godot_output_path = os.path.join(output_dir, 'godot.d.ts')
+        globals_output_path = os.path.join(output_dir, 'globals.d.ts')
 
         with open(api_path, 'r', encoding='utf-8') as f:
             api = json.load(f)
 
         os.makedirs(output_dir, exist_ok=True)
 
-        lines = self._generate(api)
+        godot_lines = self._generate(api)
+        globals_lines = self._generate_globals(api)
 
-        with open(output_path, 'w', encoding='utf-8', newline='\n') as f:
-            f.write('\n'.join(lines))
+        with open(godot_output_path, 'w', encoding='utf-8', newline='\n') as f:
+            f.write('\n'.join(godot_lines))
             f.write('\n')
 
-        print(f'Generated: {output_path}')
+        with open(globals_output_path, 'w', encoding='utf-8', newline='\n') as f:
+            f.write('\n'.join(globals_lines))
+            f.write('\n')
+
+        print(f'Generated: {godot_output_path}')
+        print(f'Generated: {globals_output_path}')
 
     def _has_raw_pointer(self, method: dict) -> bool:
         """Return True if any argument or the return value contains a raw pointer type."""
@@ -133,10 +280,23 @@ class DtsGenerator(CodeGenerator):
 
     def _format_params(self, arguments: list) -> str:
         parts = []
-        for arg in arguments:
+        optional_flags = [False] * len(arguments)
+
+        # In extension_api.json, default arguments are usually trailing.
+        # Mark only the trailing default arguments as optional in TypeScript.
+        optional_tail = True
+        for i in range(len(arguments) - 1, -1, -1):
+            has_default = 'default_value' in arguments[i]
+            if optional_tail and has_default:
+                optional_flags[i] = True
+            else:
+                optional_tail = False
+
+        for arg, is_optional in zip(arguments, optional_flags):
             name = sanitize_name(arg['name'])
             ts_type = godot_type_to_ts(arg['type'], is_input=True)
-            parts.append(f'{name}: {ts_type}')
+            opt = '?' if is_optional else ''
+            parts.append(f'{name}{opt}: {ts_type}')
         return ', '.join(parts)
 
     # ── Enum ──────────────────────────────────────────────────────────────────
@@ -182,7 +342,7 @@ class DtsGenerator(CodeGenerator):
             params = self._format_params(method.get('arguments', []))
             static = 'static ' if method.get('is_static') else ''
             if method.get('is_vararg'):
-                params = (params + ', ...args: any[]') if params else '...args: any[]'
+                params = (params + ', ...args: VariantArgument[]') if params else '...args: VariantArgument[]'
             lines.append(f'{ind2}{static}{name}({params}): {ret};')
 
         # Index signature
@@ -211,7 +371,7 @@ class DtsGenerator(CodeGenerator):
 
         name     = godot_type_to_ts(cls_data['name'])
         inherits = cls_data.get('inherits', '')
-        extends  = f' extends {inherits}' if inherits else ' extends _GodotObject'
+        extends  = f' extends {godot_type_to_ts(inherits)}' if inherits else ' extends _GodotObject'
         lines.append(f'{ind}class {name}{extends} {{')
 
         # Constants
@@ -224,6 +384,8 @@ class DtsGenerator(CodeGenerator):
         for method in cls_data.get('methods', []):
             if not self._has_raw_pointer(method):
                 declared_methods.add(method['name'])
+        # Keep getter/setter method type overrides aligned with property declared types.
+        property_method_overrides: dict = {}
 
         for prop in cls_data.get('properties', []):
             if '/' in prop['name']:  # skip grouped sub-properties
@@ -235,9 +397,12 @@ class DtsGenerator(CodeGenerator):
             lines.append(f'{ind2}get {prop["name"]}(): {ts_type};')
             if setter:
                 lines.append(f'{ind2}set {prop["name"]}(value: {ts_type_input});')
+                property_method_overrides[setter] = {'first_arg_type': ts_type_input}
             # Emit getter/setter as explicit methods when not already in the methods section
             if getter and getter not in declared_methods:
                 lines.append(f'{ind2}{sanitize_name(getter)}(): {ts_type};')
+            if getter:
+                property_method_overrides[getter] = {'return_type': ts_type}
             if setter and setter not in declared_methods:
                 lines.append(f'{ind2}{sanitize_name(setter)}(value: {ts_type_input}): void;')
 
@@ -254,9 +419,23 @@ class DtsGenerator(CodeGenerator):
             ret_v  = method.get('return_value') or {}
             ret    = godot_type_to_ts(ret_v.get('type', 'void'))
             params = self._format_params(method.get('arguments', []))
+            override = property_method_overrides.get(method['name'])
+            if override:
+                if 'return_type' in override:
+                    ret = override['return_type']
+                if 'first_arg_type' in override:
+                    args = method.get('arguments', [])
+                    if args:
+                        first_name = sanitize_name(args[0]['name'])
+                        first_param = f'{first_name}: {override["first_arg_type"]}'
+                        if len(args) > 1:
+                            rest_params = self._format_params(args[1:])
+                            params = f'{first_param}, {rest_params}' if rest_params else first_param
+                        else:
+                            params = first_param
             static = 'static ' if method.get('is_static') else ''
             if method.get('is_vararg'):
-                params = (params + ', ...args: any[]') if params else '...args: any[]'
+                params = (params + ', ...args: VariantArgument[]') if params else '...args: VariantArgument[]'
             lines.append(f'{ind2}{static}{mname}({params}): {ret};')
 
         lines.append(f'{ind}}}')
@@ -271,166 +450,6 @@ class DtsGenerator(CodeGenerator):
 
         return lines
 
-    # ── Variant class (hand-crafted to match variant_binding.gen.cpp) ────────────
-
-    def _gen_variant_class(self) -> list:
-        i = '    '   # 1-level indent (inside declare module)
-        ii = '        '  # 2-level
-        lines = [
-            f'{i}class Variant {{',
-            f'{ii}constructor(value?: any);',
-            '',
-            f'{ii}// Core',
-            f'{ii}get_type(): number;',
-            f'{ii}booleanize(): boolean;',
-            f'{ii}stringify(): string;',
-            f'{ii}toString(): string;',
-            f'{ii}/** Unwrap to the underlying JS-native value */',
-            f'{ii}value(): any;',
-            '',
-            f'{ii}// Primitive casts',
-            f'{ii}as_bool(): boolean;',
-            f'{ii}as_int(): number;',
-            f'{ii}as_float(): number;',
-            f'{ii}as_string(): string;',
-            '',
-            f'{ii}// Builtin type casts',
-            f'{ii}as_vector2(): Vector2;',
-            f'{ii}as_vector2i(): Vector2i;',
-            f'{ii}as_vector3(): Vector3;',
-            f'{ii}as_vector3i(): Vector3i;',
-            f'{ii}as_vector4(): Vector4;',
-            f'{ii}as_vector4i(): Vector4i;',
-            f'{ii}as_rect2(): Rect2;',
-            f'{ii}as_rect2i(): Rect2i;',
-            f'{ii}as_plane(): Plane;',
-            f'{ii}as_quaternion(): Quaternion;',
-            f'{ii}as_aabb(): AABB;',
-            f'{ii}as_basis(): Basis;',
-            f'{ii}as_transform2d(): Transform2D;',
-            f'{ii}as_transform3d(): Transform3D;',
-            f'{ii}as_projection(): Projection;',
-            f'{ii}as_color(): Color;',
-            f'{ii}as_string_name(): string;',
-            f'{ii}as_node_path(): string;',
-            f'{ii}as_rid(): RID;',
-            f'{ii}as_callable(): Callable;',
-            f'{ii}as_signal(): Signal;',
-            f'{ii}as_dictionary(): GDDictionary;',
-            f'{ii}as_array(): GDArray;',
-            '',
-            f'{ii}// Generic operator evaluation',
-            f'{ii}evaluate(op: number, right?: VariantArgument): any;',
-            '',
-            f'{ii}// Binary operators',
-            f'{ii}add(right: VariantArgument): any;',
-            f'{ii}subtract(right: VariantArgument): any;',
-            f'{ii}multiply(right: VariantArgument): any;',
-            f'{ii}divide(right: VariantArgument): any;',
-            f'{ii}module(right: VariantArgument): any;',
-            f'{ii}power(right: VariantArgument): any;',
-            f'{ii}shift_left(right: VariantArgument): any;',
-            f'{ii}shift_right(right: VariantArgument): any;',
-            f'{ii}bit_and(right: VariantArgument): any;',
-            f'{ii}bit_or(right: VariantArgument): any;',
-            f'{ii}bit_xor(right: VariantArgument): any;',
-            f'{ii}equal(right: VariantArgument): any;',
-            f'{ii}not_equal(right: VariantArgument): any;',
-            f'{ii}less(right: VariantArgument): any;',
-            f'{ii}less_equal(right: VariantArgument): any;',
-            f'{ii}greater(right: VariantArgument): any;',
-            f'{ii}greater_equal(right: VariantArgument): any;',
-            f'{ii}and(right: VariantArgument): any;',
-            f'{ii}or(right: VariantArgument): any;',
-            f'{ii}xor(right: VariantArgument): any;',
-            f'{ii}in(right: VariantArgument): any;',
-            '',
-            f'{ii}// Unary operators',
-            f'{ii}negate(): any;',
-            f'{ii}positive(): any;',
-            f'{ii}bit_negate(): any;',
-            f'{ii}not(): any;',
-            '',
-            f'{ii}// Static',
-            f'{ii}static get_type_name(type: number): string;',
-            '',
-            f'{ii}// Variant.Type constants',
-            f'{ii}static readonly TYPE_NIL: number;',
-            f'{ii}static readonly TYPE_BOOL: number;',
-            f'{ii}static readonly TYPE_INT: number;',
-            f'{ii}static readonly TYPE_FLOAT: number;',
-            f'{ii}static readonly TYPE_STRING: number;',
-            f'{ii}static readonly TYPE_VECTOR2: number;',
-            f'{ii}static readonly TYPE_VECTOR2I: number;',
-            f'{ii}static readonly TYPE_RECT2: number;',
-            f'{ii}static readonly TYPE_RECT2I: number;',
-            f'{ii}static readonly TYPE_VECTOR3: number;',
-            f'{ii}static readonly TYPE_VECTOR3I: number;',
-            f'{ii}static readonly TYPE_TRANSFORM2D: number;',
-            f'{ii}static readonly TYPE_VECTOR4: number;',
-            f'{ii}static readonly TYPE_VECTOR4I: number;',
-            f'{ii}static readonly TYPE_PLANE: number;',
-            f'{ii}static readonly TYPE_QUATERNION: number;',
-            f'{ii}static readonly TYPE_AABB: number;',
-            f'{ii}static readonly TYPE_BASIS: number;',
-            f'{ii}static readonly TYPE_TRANSFORM3D: number;',
-            f'{ii}static readonly TYPE_PROJECTION: number;',
-            f'{ii}static readonly TYPE_COLOR: number;',
-            f'{ii}static readonly TYPE_STRING_NAME: number;',
-            f'{ii}static readonly TYPE_NODE_PATH: number;',
-            f'{ii}static readonly TYPE_RID: number;',
-            f'{ii}static readonly TYPE_OBJECT: number;',
-            f'{ii}static readonly TYPE_CALLABLE: number;',
-            f'{ii}static readonly TYPE_SIGNAL: number;',
-            f'{ii}static readonly TYPE_DICTIONARY: number;',
-            f'{ii}static readonly TYPE_ARRAY: number;',
-            f'{ii}static readonly TYPE_PACKED_BYTE_ARRAY: number;',
-            f'{ii}static readonly TYPE_PACKED_INT32_ARRAY: number;',
-            f'{ii}static readonly TYPE_PACKED_INT64_ARRAY: number;',
-            f'{ii}static readonly TYPE_PACKED_FLOAT32_ARRAY: number;',
-            f'{ii}static readonly TYPE_PACKED_FLOAT64_ARRAY: number;',
-            f'{ii}static readonly TYPE_PACKED_STRING_ARRAY: number;',
-            f'{ii}static readonly TYPE_PACKED_VECTOR2_ARRAY: number;',
-            f'{ii}static readonly TYPE_PACKED_VECTOR3_ARRAY: number;',
-            f'{ii}static readonly TYPE_PACKED_COLOR_ARRAY: number;',
-            f'{ii}static readonly TYPE_PACKED_VECTOR4_ARRAY: number;',
-            f'{ii}static readonly TYPE_MAX: number;',
-            '',
-            f'{ii}// Variant.Operator constants',
-            f'{ii}static readonly OP_EQUAL: number;',
-            f'{ii}static readonly OP_NOT_EQUAL: number;',
-            f'{ii}static readonly OP_LESS: number;',
-            f'{ii}static readonly OP_LESS_EQUAL: number;',
-            f'{ii}static readonly OP_GREATER: number;',
-            f'{ii}static readonly OP_GREATER_EQUAL: number;',
-            f'{ii}static readonly OP_ADD: number;',
-            f'{ii}static readonly OP_SUBTRACT: number;',
-            f'{ii}static readonly OP_MULTIPLY: number;',
-            f'{ii}static readonly OP_DIVIDE: number;',
-            f'{ii}static readonly OP_NEGATE: number;',
-            f'{ii}static readonly OP_POSITIVE: number;',
-            f'{ii}static readonly OP_MODULE: number;',
-            f'{ii}static readonly OP_POWER: number;',
-            f'{ii}static readonly OP_SHIFT_LEFT: number;',
-            f'{ii}static readonly OP_SHIFT_RIGHT: number;',
-            f'{ii}static readonly OP_BIT_AND: number;',
-            f'{ii}static readonly OP_BIT_OR: number;',
-            f'{ii}static readonly OP_BIT_XOR: number;',
-            f'{ii}static readonly OP_BIT_NEGATE: number;',
-            f'{ii}static readonly OP_AND: number;',
-            f'{ii}static readonly OP_OR: number;',
-            f'{ii}static readonly OP_XOR: number;',
-            f'{ii}static readonly OP_NOT: number;',
-            f'{ii}static readonly OP_IN: number;',
-            f'{ii}static readonly OP_MAX: number;',
-            f'{i}}}',
-            f'{i}namespace Variant {{',
-            f'{ii}type Type = number;',
-            f'{ii}type Operator = number;',
-            f'{i}}}',
-        ]
-        return lines
-    
     def _gen_utility_functions(self, api: dict, indent: int) -> list:
         ind = self._ind(indent)
         lines = []
@@ -439,8 +458,136 @@ class DtsGenerator(CodeGenerator):
             ret = godot_type_to_ts(func.get('return_type', 'void'))
             params = self._format_params(func.get('arguments', []))
             if func.get('is_vararg'):
-                params = (params + ', ...args: any[]') if params else '...args: any[]'
+                params = (params + ', ...args: VariantArgument[]') if params else '...args: VariantArgument[]'
             lines.append(f'{ind}{ind}{name}({params}): {ret};')
+        return lines
+
+    def _gen_variant_type_enum(self) -> list:
+        """Generate Variant.Type enum definition"""
+        lines = []
+        lines.append('    const enum VariantType {')
+        lines.append('        TYPE_NIL = 0,')
+        lines.append('        TYPE_BOOL = 1,')
+        lines.append('        TYPE_INT = 2,')
+        lines.append('        TYPE_FLOAT = 3,')
+        lines.append('        TYPE_STRING = 4,')
+        lines.append('        TYPE_VECTOR2 = 5,')
+        lines.append('        TYPE_VECTOR2I = 6,')
+        lines.append('        TYPE_RECT2 = 7,')
+        lines.append('        TYPE_RECT2I = 8,')
+        lines.append('        TYPE_VECTOR3 = 9,')
+        lines.append('        TYPE_VECTOR3I = 10,')
+        lines.append('        TYPE_TRANSFORM2D = 11,')
+        lines.append('        TYPE_VECTOR4 = 12,')
+        lines.append('        TYPE_VECTOR4I = 13,')
+        lines.append('        TYPE_PLANE = 14,')
+        lines.append('        TYPE_QUATERNION = 15,')
+        lines.append('        TYPE_AABB = 16,')
+        lines.append('        TYPE_BASIS = 17,')
+        lines.append('        TYPE_TRANSFORM3D = 18,')
+        lines.append('        TYPE_PROJECTION = 19,')
+        lines.append('        TYPE_COLOR = 20,')
+        lines.append('        TYPE_STRING_NAME = 21,')
+        lines.append('        TYPE_NODE_PATH = 22,')
+        lines.append('        TYPE_RID = 23,')
+        lines.append('        TYPE_OBJECT = 24,')
+        lines.append('        TYPE_CALLABLE = 25,')
+        lines.append('        TYPE_SIGNAL = 26,')
+        lines.append('        TYPE_DICTIONARY = 27,')
+        lines.append('        TYPE_ARRAY = 28,')
+        lines.append('        TYPE_PACKED_BYTE_ARRAY = 29,')
+        lines.append('        TYPE_PACKED_INT32_ARRAY = 30,')
+        lines.append('        TYPE_PACKED_INT64_ARRAY = 31,')
+        lines.append('        TYPE_PACKED_FLOAT32_ARRAY = 32,')
+        lines.append('        TYPE_PACKED_FLOAT64_ARRAY = 33,')
+        lines.append('        TYPE_PACKED_STRING_ARRAY = 34,')
+        lines.append('        TYPE_PACKED_VECTOR2_ARRAY = 35,')
+        lines.append('        TYPE_PACKED_VECTOR3_ARRAY = 36,')
+        lines.append('        TYPE_PACKED_COLOR_ARRAY = 37,')
+        lines.append('        TYPE_PACKED_VECTOR4_ARRAY = 38,')
+        lines.append('        TYPE_MAX = 39,')
+        lines.append('    }')
+        lines.append('')
+        lines.append('    export const VariantType: typeof VariantType;')
+        return lines
+
+    def _gen_variant_operator_enum(self) -> list:
+        """Generate Variant.Operator enum definition"""
+        lines = []
+        lines.append('    const enum VariantOperator {')
+        lines.append('        OP_EQUAL = 0,')
+        lines.append('        OP_NOT_EQUAL = 1,')
+        lines.append('        OP_LESS = 2,')
+        lines.append('        OP_LESS_EQUAL = 3,')
+        lines.append('        OP_GREATER = 4,')
+        lines.append('        OP_GREATER_EQUAL = 5,')
+        lines.append('        OP_ADD = 6,')
+        lines.append('        OP_SUBTRACT = 7,')
+        lines.append('        OP_MULTIPLY = 8,')
+        lines.append('        OP_DIVIDE = 9,')
+        lines.append('        OP_NEGATE = 10,')
+        lines.append('        OP_POSITIVE = 11,')
+        lines.append('        OP_MODULE = 12,')
+        lines.append('        OP_POWER = 13,')
+        lines.append('        OP_SHIFT_LEFT = 14,')
+        lines.append('        OP_SHIFT_RIGHT = 15,')
+        lines.append('        OP_BIT_AND = 16,')
+        lines.append('        OP_BIT_OR = 17,')
+        lines.append('        OP_BIT_XOR = 18,')
+        lines.append('        OP_BIT_NEGATE = 19,')
+        lines.append('        OP_AND = 20,')
+        lines.append('        OP_OR = 21,')
+        lines.append('        OP_XOR = 22,')
+        lines.append('        OP_NOT = 23,')
+        lines.append('        OP_IN = 24,')
+        lines.append('        OP_MAX = 25,')
+        lines.append('    }')
+        lines.append('')
+        lines.append('    export const VariantOperator: typeof VariantOperator;')
+        return lines
+
+    def _collect_global_symbols(self, api: dict) -> list:
+        symbols = []
+
+        for cls in api.get('builtin_classes', []):
+            name = cls['name']
+            if name in SKIP_BUILTINS:
+                continue
+            symbols.append(RENAME_MAP.get(name, name))
+
+        for singleton in api.get('singletons', []):
+            symbols.append(singleton['name'])
+
+        symbols.append('GD')
+
+        # Preserve order while removing duplicates.
+        return list(dict.fromkeys(symbols))
+
+    def _generate_globals(self, api: dict) -> list:
+        symbols = self._collect_global_symbols(api)
+
+        import_items = ', '.join(f'{name} as Godot{name}' for name in symbols)
+
+        lines = []
+        lines.append('// Auto-generated by code_generator/dts — do not edit manually.')
+        lines.append('')
+        lines.append(f'import {{ {import_items} }} from "godot";')
+        lines.append('')
+        lines.append('declare global {')
+        for name in symbols:
+            lines.append(f'  type {name} = Godot{name};')
+            lines.append(f'  const {name}: typeof Godot{name};')
+
+        lines.append('  interface ExportEntry {')
+        lines.append('    type: string;')
+        lines.append('    default?: VariantArgument;')
+        lines.append('    hint?: number;')
+        lines.append('    hint_string?: string;')
+        lines.append('  }')
+
+        lines.append('}')
+        lines.append('')
+        lines.append('export {};')
         return lines
 
     # ── Top-level ─────────────────────────────────────────────────────────────
@@ -454,7 +601,9 @@ class DtsGenerator(CodeGenerator):
                 continue
             builtin_types.append(RENAME_MAP.get(name, name))
         
-        variant_arg_types = ['Variant', 'boolean', 'number', 'string', 'GodotObject'] + builtin_types + ['any']
+        variant_arg_types = ['boolean', 'number', 'string', 'GodotObject'] + builtin_types
+        variant_arg_types.extend([JS_OBJECT_TYPE, JS_ARRAY_TYPE])
+        variant_arg_types = list(dict.fromkeys(variant_arg_types))
         variant_arg_str = ' | '.join(variant_arg_types)
 
         lines = []
@@ -469,17 +618,13 @@ class DtsGenerator(CodeGenerator):
         lines += [
             '    class _GodotObject {',
             '        get_instance_id(): number;',
-            '        connect(signal: string, callable: (...args: any[]) => void): void;',
-            '        disconnect(signal: string, callable: (...args: any[]) => void): void;',
-            '        emit_signal(signal: string, ...args: any[]): void;',
-            '        to_signal(signal: string, options?: { timeoutMs?: number; abortSignal?: AbortSignal }): Promise<any>;',
+            '        connect(signal: string, callable: (...args: VariantArgument[]) => void): void;',
+            '        disconnect(signal: string, callable: (...args: VariantArgument[]) => void): void;',
+            '        emit_signal(signal: string, ...args: VariantArgument[]): void;',
+            '        to_signal(signal: string, options?: { timeoutMs?: number; abortSignal?: AbortSignal }): Promise<VariantArgument>;',
             '    }',
             '',
         ]
-
-        # Variant class (hand-crafted — matches variant_binding.gen.cpp)
-        lines += self._gen_variant_class()
-        lines.append('')
 
         # Global enums
         for enum in api.get('global_enums', []):
@@ -487,6 +632,14 @@ class DtsGenerator(CodeGenerator):
                 continue
             lines += self._gen_enum(enum, indent=1)
             lines.append('')
+
+        # Variant.Type enum (manually added since we removed VariantBinding)
+        lines += self._gen_variant_type_enum()
+        lines.append('')
+
+        # Variant.Operator enum (manually added since we removed VariantBinding)
+        lines += self._gen_variant_operator_enum()
+        lines.append('')
 
         # Builtin classes (Vector2, Color, …)
         for cls in api.get('builtin_classes', []):
@@ -510,18 +663,19 @@ class DtsGenerator(CodeGenerator):
         # GodotNamespace — what `import godot from "godot"` returns
         singletons = {s['name']: s['type'] for s in api.get('singletons', [])}
 
-        lines.append('')
-        lines.append('    export const Variant: typeof Variant;')
         for cls in api.get('builtin_classes', []):
             name = cls['name']
             if name in SKIP_BUILTINS:
                 continue
             ts_name = RENAME_MAP.get(name, name)
             lines.append(f'    export const {ts_name}: typeof {ts_name};')
+            lines.append(f'    export type {ts_name} = {ts_name};')
 
         for cls in api.get('classes', []):
             name = cls['name']
-            lines.append(f'    export const {name}: typeof {name};')
+            ts_name = RENAME_MAP.get(name, name)
+            lines.append(f'    export const {ts_name}: typeof {ts_name};')
+            lines.append(f'    export type {ts_name} = {ts_name};')
 
         for s_name, s_type in singletons.items():
             lines.append(f'    export const {s_name}: {s_type};')
@@ -540,7 +694,8 @@ class DtsGenerator(CodeGenerator):
 
         for cls in api.get('classes', []):
             name = cls['name']
-            lines.append(f'        {name}: typeof {name};')
+            ts_name = RENAME_MAP.get(name, name)
+            lines.append(f'        {ts_name}: typeof {ts_name};')
 
         for s_name, s_type in singletons.items():
             lines.append(f'        {s_name}: {s_type};')
@@ -551,18 +706,5 @@ class DtsGenerator(CodeGenerator):
         lines.append('    const _godot: GodotNamespace;')
         lines.append('    export default _godot;')
         lines.append('}')
-
-        lines.append('')
-        lines.append('declare const Variant: typeof import("godot").Variant;')
-        for cls in api.get('builtin_classes', []):
-            name = cls['name']
-            if name in SKIP_BUILTINS:
-                continue
-            ts_name = RENAME_MAP.get(name, name)
-            lines.append(f'declare const {ts_name}: typeof import("godot").{ts_name};')
-
-        for s_name, s_type in singletons.items():
-            lines.append(f'declare const {s_name}: import("godot").{s_type};')
-        lines.append('declare const GD: import("godot").GDObjectSingleton;')
 
         return lines

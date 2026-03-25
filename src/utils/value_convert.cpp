@@ -60,6 +60,29 @@ static std::unordered_map<std::string, ClassInfo> class_registry;
 static std::vector<ClassInfo> class_list;
 static std::unordered_map<uint64_t, Napi::ObjectReference> object_cache;
 
+static godot::Dictionary object_to_dictionary(const Napi::Object &obj) {
+	godot::Dictionary dict;
+	Napi::Array property_names = obj.GetPropertyNames();
+	uint32_t property_count = property_names.Length();
+
+	for (uint32_t i = 0; i < property_count; i++) {
+		Napi::Value key = property_names.Get(i);
+		Napi::Value val = obj.Get(key);
+		dict[napi_to_godot(key)] = napi_to_godot(val);
+	}
+
+	return dict;
+}
+
+static godot::Array js_array_to_godot_array(const Napi::Array &js_array) {
+	godot::Array array;
+	const uint32_t length = js_array.Length();
+	for (uint32_t i = 0; i < length; i++) {
+		array.append(napi_to_godot(js_array.Get(i)));
+	}
+	return array;
+}
+
 static void remove_from_cache(Napi::Env env, void *data, uint64_t *hint) {
 	if (hint) {
 		object_cache.erase(*hint);
@@ -110,6 +133,30 @@ Napi::Value godot_to_napi(Napi::Env env, godot::Variant variant) {
 		case godot::Variant::Type::STRING:
 		case godot::Variant::Type::STRING_NAME:
 			return Napi::String::New(env, variant.operator String().utf8().get_data());
+		case godot::Variant::Type::ARRAY: {
+			const godot::Array godot_array = variant.operator godot::Array();
+			const uint32_t array_length = static_cast<uint32_t>(godot_array.size());
+			Napi::Array js_array = Napi::Array::New(env, array_length);
+			for (uint32_t i = 0; i < array_length; i++) {
+				js_array.Set(i, godot_to_napi(env, godot_array[i]));
+			}
+			return js_array;
+		}
+		case godot::Variant::Type::DICTIONARY: {
+			const godot::Dictionary godot_dictionary = variant.operator godot::Dictionary();
+			Napi::Object js_object = Napi::Object::New(env);
+
+			const godot::Array keys = godot_dictionary.keys();
+			const int64_t key_count = keys.size();
+			for (int64_t i = 0; i < key_count; i++) {
+				const godot::Variant key = keys[i];
+				const godot::String key_string = key.operator godot::String();
+				js_object.Set(
+					Napi::String::New(env, key_string.utf8().get_data()),
+					godot_to_napi(env, godot_dictionary.get(key, Variant())));
+			}
+			return js_object;
+		}
 
 			BIND_BUILTIN_TO_NAPI(VECTOR2, Vector2Binding)
 			BIND_BUILTIN_TO_NAPI(VECTOR2I, Vector2iBinding)
@@ -130,8 +177,6 @@ Napi::Value godot_to_napi(Napi::Env env, godot::Variant variant) {
 			BIND_BUILTIN_TO_NAPI(NODE_PATH, NodePathBinding)
 			BIND_BUILTIN_TO_NAPI(RID, RIDBinding)
 			BIND_BUILTIN_TO_NAPI(SIGNAL, SignalBinding)
-			BIND_BUILTIN_TO_NAPI(DICTIONARY, DictionaryBinding)
-			BIND_BUILTIN_TO_NAPI(ARRAY, ArrayBinding)
 			BIND_BUILTIN_TO_NAPI(PACKED_BYTE_ARRAY, PackedByteArrayBinding)
 			BIND_BUILTIN_TO_NAPI(PACKED_INT32_ARRAY, PackedInt32ArrayBinding)
 			BIND_BUILTIN_TO_NAPI(PACKED_INT64_ARRAY, PackedInt64ArrayBinding)
@@ -148,13 +193,6 @@ Napi::Value godot_to_napi(Napi::Env env, godot::Variant variant) {
 			if (callable.is_custom()) {
 				gode::JavascriptCallable *js_callable = dynamic_cast<gode::JavascriptCallable *>(callable.get_custom());
 				if (js_callable) {
-					// Don't unwrap if we are inside a container structure,
-					// because we want to preserve the Callable identity in Godot
-					// But wait, the original logic was returning the function itself.
-					// If we return the function, JS sees a function.
-					// But in get_signal_connection_list, we get a Dictionary.
-					// The 'callable' field is a Variant::CALLABLE.
-					// If we return the JS function here, then `conn_info.get("callable")` will return the JS function.
 					return js_callable->get_function();
 				}
 			}
@@ -221,6 +259,8 @@ godot::Variant napi_to_godot(Napi::Value value) {
 	} else if (value.IsFunction()) {
 		JavascriptCallable *callable = memnew(JavascriptCallable(value.As<Napi::Function>()));
 		return godot::Callable(callable);
+	} else if (value.IsArray()) {
+		return js_array_to_godot_array(value.As<Napi::Array>());
 	} else if (value.IsObject()) {
 		Napi::Object obj = value.As<Napi::Object>();
 
@@ -261,8 +301,8 @@ godot::Variant napi_to_godot(Napi::Value value) {
 		if (obj_inst) {
 			return godot::Variant(obj_inst);
 		}
-
-		return godot::Variant();
+		
+		return object_to_dictionary(obj);
 	} else {
 		return godot::Variant();
 	}
