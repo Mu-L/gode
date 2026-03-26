@@ -71,53 +71,97 @@ bool Typescript::compile() const {
 	member_lines.clear();
 	is_tool_script = false;
 
-	// Read static exports
-	if (cls.Has("exports")) {
-		Napi::Value exp_val = cls.Get("exports");
-		if (exp_val.IsObject()) {
-			Napi::Object exp_obj = exp_val.As<Napi::Object>();
-			Napi::Array keys = exp_obj.GetPropertyNames();
-			for (uint32_t i = 0; i < keys.Length(); i++) {
-				std::string key = keys.Get(i).As<Napi::String>().Utf8Value();
-				Napi::Value entry = exp_obj.Get(key);
-				if (!entry.IsObject()) continue;
-				Napi::Object entry_obj = entry.As<Napi::Object>();
+	// Parse static exports from AST
+	auto parse_exports = [&](TSNode body_node) {
+		uint32_t mc = ts_node_child_count(body_node);
+		for (uint32_t j = 0; j < mc; j++) {
+			TSNode member = ts_node_child(body_node, j);
+			if (strcmp(ts_node_type(member), "public_field_definition") != 0) continue;
+
+			bool is_static = false;
+			TSNode name_node = { 0 };
+			TSNode value_node = { 0 };
+
+			uint32_t fc = ts_node_child_count(member);
+			for (uint32_t k = 0; k < fc; k++) {
+				TSNode child = ts_node_child(member, k);
+				const char *ct = ts_node_type(child);
+				if (strcmp(ct, "static") == 0) is_static = true;
+				else if (strcmp(ct, "property_identifier") == 0) name_node = child;
+				else if (strcmp(ct, "object") == 0) value_node = child;
+			}
+
+			if (!is_static || ts_node_is_null(name_node) || ts_node_is_null(value_node)) continue;
+
+			uint32_t ns = ts_node_start_byte(name_node);
+			uint32_t ne = ts_node_end_byte(name_node);
+			std::string field_name = source.substr(ns, ne - ns);
+			if (field_name != "exports") continue;
+
+			uint32_t oc = ts_node_child_count(value_node);
+			for (uint32_t m = 0; m < oc; m++) {
+				TSNode pair = ts_node_child(value_node, m);
+				if (strcmp(ts_node_type(pair), "pair") != 0) continue;
+
+				TSNode key_node = ts_node_child_by_field_name(pair, "key", 3);
+				TSNode val_node = ts_node_child_by_field_name(pair, "value", 5);
+				if (ts_node_is_null(key_node) || ts_node_is_null(val_node) || strcmp(ts_node_type(val_node), "object") != 0) continue;
+
+				uint32_t ks = ts_node_start_byte(key_node);
+				uint32_t ke = ts_node_end_byte(key_node);
+				std::string prop_name = source.substr(ks, ke - ks);
 
 				PropertyInfo pi;
-				pi.name = StringName(key.c_str());
+				pi.name = StringName(prop_name.c_str());
 				pi.usage = PROPERTY_USAGE_DEFAULT;
 				pi.hint = PROPERTY_HINT_NONE;
+				pi.type = Variant::NIL;
 
-				if (entry_obj.Has("type") && entry_obj.Get("type").IsString()) {
-					std::string type_str = entry_obj.Get("type").As<Napi::String>().Utf8Value();
-					if (type_str == "bool") pi.type = Variant::BOOL;
-					else if (type_str == "int") pi.type = Variant::INT;
-					else if (type_str == "float" || type_str == "number") pi.type = Variant::FLOAT;
-					else if (type_str == "String" || type_str == "string") pi.type = Variant::STRING;
-					else if (type_str == "Vector2") pi.type = Variant::VECTOR2;
-					else if (type_str == "Vector2i") pi.type = Variant::VECTOR2I;
-					else if (type_str == "Vector3") pi.type = Variant::VECTOR3;
-					else if (type_str == "Vector3i") pi.type = Variant::VECTOR3I;
-					else if (type_str == "Vector4") pi.type = Variant::VECTOR4;
-					else if (type_str == "Vector4i") pi.type = Variant::VECTOR4I;
-					else if (type_str == "Color") pi.type = Variant::COLOR;
-					else if (type_str == "NodePath") pi.type = Variant::NODE_PATH;
-					else if (type_str == "Object") pi.type = Variant::OBJECT;
-					else pi.type = Variant::NIL;
+				uint32_t pc = ts_node_child_count(val_node);
+				for (uint32_t n = 0; n < pc; n++) {
+					TSNode prop_pair = ts_node_child(val_node, n);
+					if (strcmp(ts_node_type(prop_pair), "pair") != 0) continue;
+
+					TSNode pk = ts_node_child_by_field_name(prop_pair, "key", 3);
+					TSNode pv = ts_node_child_by_field_name(prop_pair, "value", 5);
+					if (ts_node_is_null(pk) || ts_node_is_null(pv)) continue;
+
+					uint32_t pks = ts_node_start_byte(pk);
+					uint32_t pke = ts_node_end_byte(pk);
+					std::string field_key = source.substr(pks, pke - pks);
+
+					if (field_key == "type" && strcmp(ts_node_type(pv), "string") == 0) {
+						uint32_t pvs = ts_node_start_byte(pv) + 1;
+						uint32_t pve = ts_node_end_byte(pv) - 1;
+						std::string type_str = source.substr(pvs, pve - pvs);
+						if (type_str == "bool") pi.type = Variant::BOOL;
+						else if (type_str == "int") pi.type = Variant::INT;
+						else if (type_str == "float" || type_str == "number") pi.type = Variant::FLOAT;
+						else if (type_str == "String" || type_str == "string") pi.type = Variant::STRING;
+						else if (type_str == "Vector2") pi.type = Variant::VECTOR2;
+						else if (type_str == "Vector2i") pi.type = Variant::VECTOR2I;
+						else if (type_str == "Vector3") pi.type = Variant::VECTOR3;
+						else if (type_str == "Vector3i") pi.type = Variant::VECTOR3I;
+						else if (type_str == "Vector4") pi.type = Variant::VECTOR4;
+						else if (type_str == "Vector4i") pi.type = Variant::VECTOR4I;
+						else if (type_str == "Color") pi.type = Variant::COLOR;
+						else if (type_str == "NodePath") pi.type = Variant::NODE_PATH;
+						else if (type_str == "Object") pi.type = Variant::OBJECT;
+					} else if (field_key == "hint" && strcmp(ts_node_type(pv), "number") == 0) {
+						uint32_t pvs = ts_node_start_byte(pv);
+						uint32_t pve = ts_node_end_byte(pv);
+						pi.hint = (PropertyHint)std::stoi(source.substr(pvs, pve - pvs));
+					} else if (field_key == "hint_string" && strcmp(ts_node_type(pv), "string") == 0) {
+						uint32_t pvs = ts_node_start_byte(pv) + 1;
+						uint32_t pve = ts_node_end_byte(pv) - 1;
+						pi.hint_string = String(source.substr(pvs, pve - pvs).c_str());
+					}
 				}
-				if (entry_obj.Has("hint") && entry_obj.Get("hint").IsNumber()) {
-					pi.hint = (PropertyHint)entry_obj.Get("hint").As<Napi::Number>().Int32Value();
-				}
-				if (entry_obj.Has("hint_string") && entry_obj.Get("hint_string").IsString()) {
-					pi.hint_string = String(entry_obj.Get("hint_string").As<Napi::String>().Utf8Value().c_str());
-				}
+
 				properties[pi.name] = pi;
-				if (entry_obj.Has("default")) {
-					property_defaults[pi.name] = napi_to_godot(entry_obj.Get("default"));
-				}
 			}
 		}
-	}
+	};
 
 	// Read static tool — equivalent to @tool in GDScript
 	// TS usage: static tool = true
@@ -174,12 +218,46 @@ bool Typescript::compile() const {
 			}
 		}
 
-		// methods from class body
+		// methods and exports from class body
 		if (!ts_node_is_null(body_node)) {
+			parse_exports(body_node);
+
 			uint32_t mc = ts_node_child_count(body_node);
 			for (uint32_t j = 0; j < mc; j++) {
 				TSNode member = ts_node_child(body_node, j);
-				if (strcmp(ts_node_type(member), "method_definition") != 0) continue;
+				const char *member_type = ts_node_type(member);
+
+				if (strcmp(member_type, "public_field_definition") == 0) {
+					TSNode field_name_node = ts_node_child_by_field_name(member, "name", 4);
+					TSNode field_value_node = ts_node_child_by_field_name(member, "value", 5);
+
+					if (!ts_node_is_null(field_name_node) && !ts_node_is_null(field_value_node)) {
+						uint32_t fns = ts_node_start_byte(field_name_node);
+						uint32_t fne = ts_node_end_byte(field_name_node);
+						StringName field_name(source.substr(fns, fne - fns).c_str());
+
+						if (properties.has(field_name)) {
+							const char *vt = ts_node_type(field_value_node);
+							uint32_t vs = ts_node_start_byte(field_value_node);
+							uint32_t ve = ts_node_end_byte(field_value_node);
+
+							if (strcmp(vt, "string") == 0) {
+								property_defaults[field_name] = String(source.substr(vs + 1, ve - vs - 2).c_str());
+							} else if (strcmp(vt, "number") == 0) {
+								std::string num_str = source.substr(vs, ve - vs);
+								if (properties[field_name].type == Variant::INT) property_defaults[field_name] = std::stoi(num_str);
+								else property_defaults[field_name] = std::stod(num_str);
+							} else if (strcmp(vt, "true") == 0) {
+								property_defaults[field_name] = true;
+							} else if (strcmp(vt, "false") == 0) {
+								property_defaults[field_name] = false;
+							}
+						}
+					}
+					continue;
+				}
+
+				if (strcmp(member_type, "method_definition") != 0) continue;
 
 				TSNode mn = ts_node_child_by_field_name(member, "name", strlen("name"));
 				if (ts_node_is_null(mn)) continue;

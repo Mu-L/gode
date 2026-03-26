@@ -581,7 +581,6 @@ class DtsGenerator(CodeGenerator):
 
         lines.append('  interface ExportEntry {')
         lines.append('    type: string;')
-        lines.append('    default?: VariantArgument;')
         lines.append('    hint?: number;')
         lines.append('    hint_string?: string;')
         lines.append('  }')

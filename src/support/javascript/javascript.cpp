@@ -66,80 +66,7 @@ bool Javascript::compile() const {
 	member_lines.clear();
 	is_tool_script = false;
 
-	// Read static exports — equivalent to @export in GDScript
-	// JS usage: static exports = { speed: { type: "float", default: 100.0 } }
-	if (cls.Has("exports")) {
-		Napi::Value exp_val = cls.Get("exports");
-		if (exp_val.IsObject()) {
-			Napi::Object exp_obj = exp_val.As<Napi::Object>();
-			Napi::Array keys = exp_obj.GetPropertyNames();
-			for (uint32_t i = 0; i < keys.Length(); i++) {
-				std::string key = keys.Get(i).As<Napi::String>().Utf8Value();
-				Napi::Value entry = exp_obj.Get(key);
-				if (!entry.IsObject()) {
-					continue;
-				}
-				Napi::Object entry_obj = entry.As<Napi::Object>();
-
-				PropertyInfo pi;
-				pi.name = StringName(key.c_str());
-				pi.usage = PROPERTY_USAGE_DEFAULT;
-				pi.hint = PROPERTY_HINT_NONE;
-
-				// type
-				if (entry_obj.Has("type") && entry_obj.Get("type").IsString()) {
-					std::string type_str = entry_obj.Get("type").As<Napi::String>().Utf8Value();
-					if (type_str == "bool") {
-						pi.type = Variant::BOOL;
-					} else if (type_str == "int") {
-						pi.type = Variant::INT;
-					} else if (type_str == "float" || type_str == "number") {
-						pi.type = Variant::FLOAT;
-					} else if (type_str == "String" || type_str == "string") {
-						pi.type = Variant::STRING;
-					} else if (type_str == "Vector2") {
-						pi.type = Variant::VECTOR2;
-					} else if (type_str == "Vector2i") {
-						pi.type = Variant::VECTOR2I;
-					} else if (type_str == "Vector3") {
-						pi.type = Variant::VECTOR3;
-					} else if (type_str == "Vector3i") {
-						pi.type = Variant::VECTOR3I;
-					} else if (type_str == "Vector4") {
-						pi.type = Variant::VECTOR4;
-					} else if (type_str == "Vector4i") {
-						pi.type = Variant::VECTOR4I;
-					} else if (type_str == "Color") {
-						pi.type = Variant::COLOR;
-					} else if (type_str == "NodePath") {
-						pi.type = Variant::NODE_PATH;
-					} else if (type_str == "Object") {
-						pi.type = Variant::OBJECT;
-					} else {
-						pi.type = Variant::NIL;
-					}
-				}
-
-				// hint (integer constant, e.g. PROPERTY_HINT_RANGE = 1)
-				if (entry_obj.Has("hint") && entry_obj.Get("hint").IsNumber()) {
-					pi.hint = (PropertyHint)entry_obj.Get("hint").As<Napi::Number>().Int32Value();
-				}
-
-				// hint_string (e.g. "0,200,1" for range)
-				if (entry_obj.Has("hint_string") && entry_obj.Get("hint_string").IsString()) {
-					std::string hs = entry_obj.Get("hint_string").As<Napi::String>().Utf8Value();
-					pi.hint_string = String(hs.c_str());
-				}
-
-				properties[pi.name] = pi;
-
-				// default value
-				if (entry_obj.Has("default")) {
-					property_defaults[pi.name] = napi_to_godot(entry_obj.Get("default"));
-				}
-			}
-		}
-	}
+	// Parse exports using tree-sitter (will be done in class body iteration below)
 
 	// Read static tool — equivalent to @tool in GDScript
 	// JS usage: static tool = true
@@ -196,6 +123,124 @@ bool Javascript::compile() const {
 				TSNode member = ts_node_child(body, j);
 				const char *member_type = ts_node_type(member);
 
+				if (strcmp(member_type, "field_definition") == 0) {
+					bool is_static = false;
+					TSNode prop_name_node;
+					TSNode value_node;
+
+					uint32_t field_child_count = ts_node_child_count(member);
+					for (uint32_t k = 0; k < field_child_count; k++) {
+						TSNode field_child = ts_node_child(member, k);
+						const char *child_type = ts_node_type(field_child);
+						if (strcmp(child_type, "static") == 0) {
+							is_static = true;
+						} else if (strcmp(child_type, "property_identifier") == 0) {
+							prop_name_node = field_child;
+						} else if (strcmp(child_type, "object") == 0 || strcmp(child_type, "string") == 0 || strcmp(child_type, "number") == 0 || strcmp(child_type, "true") == 0 || strcmp(child_type, "false") == 0) {
+							value_node = field_child;
+						}
+					}
+
+					if (is_static && !ts_node_is_null(prop_name_node) && !ts_node_is_null(value_node)) {
+						uint32_t name_start = ts_node_start_byte(prop_name_node);
+						uint32_t name_end = ts_node_end_byte(prop_name_node);
+						std::string prop_name = source.substr(name_start, name_end - name_start);
+
+						if (prop_name == "exports") {
+							uint32_t obj_child_count = ts_node_child_count(value_node);
+							for (uint32_t m = 0; m < obj_child_count; m++) {
+								TSNode obj_child = ts_node_child(value_node, m);
+								if (strcmp(ts_node_type(obj_child), "pair") == 0) {
+									TSNode key_node = ts_node_child_by_field_name(obj_child, "key", strlen("key"));
+									TSNode val_node = ts_node_child_by_field_name(obj_child, "value", strlen("value"));
+
+									if (!ts_node_is_null(key_node) && !ts_node_is_null(val_node)) {
+										uint32_t key_start = ts_node_start_byte(key_node);
+										uint32_t key_end = ts_node_end_byte(key_node);
+										std::string key_str = source.substr(key_start, key_end - key_start);
+
+										if (key_str.length() >= 2 && (key_str[0] == '"' || key_str[0] == '\'')) {
+											key_str = key_str.substr(1, key_str.length() - 2);
+										}
+
+										PropertyInfo pi;
+										pi.name = StringName(key_str.c_str());
+										pi.usage = PROPERTY_USAGE_DEFAULT;
+										pi.hint = PROPERTY_HINT_NONE;
+										pi.type = Variant::NIL;
+
+										uint32_t pc = ts_node_child_count(val_node);
+										for (uint32_t n = 0; n < pc; n++) {
+											TSNode prop_pair = ts_node_child(val_node, n);
+											if (strcmp(ts_node_type(prop_pair), "pair") != 0) continue;
+
+											TSNode pk = ts_node_child_by_field_name(prop_pair, "key", 3);
+											TSNode pv = ts_node_child_by_field_name(prop_pair, "value", 5);
+											if (ts_node_is_null(pk) || ts_node_is_null(pv)) continue;
+
+											uint32_t pks = ts_node_start_byte(pk);
+											uint32_t pke = ts_node_end_byte(pk);
+											std::string field_key = source.substr(pks, pke - pks);
+
+											if (field_key == "type" && strcmp(ts_node_type(pv), "string") == 0) {
+												uint32_t pvs = ts_node_start_byte(pv) + 1;
+												uint32_t pve = ts_node_end_byte(pv) - 1;
+												std::string type_str = source.substr(pvs, pve - pvs);
+												if (type_str == "bool") pi.type = Variant::BOOL;
+												else if (type_str == "int") pi.type = Variant::INT;
+												else if (type_str == "float" || type_str == "number") pi.type = Variant::FLOAT;
+												else if (type_str == "String" || type_str == "string") pi.type = Variant::STRING;
+												else if (type_str == "Vector2") pi.type = Variant::VECTOR2;
+												else if (type_str == "Vector2i") pi.type = Variant::VECTOR2I;
+												else if (type_str == "Vector3") pi.type = Variant::VECTOR3;
+												else if (type_str == "Vector3i") pi.type = Variant::VECTOR3I;
+												else if (type_str == "Vector4") pi.type = Variant::VECTOR4;
+												else if (type_str == "Vector4i") pi.type = Variant::VECTOR4I;
+												else if (type_str == "Color") pi.type = Variant::COLOR;
+												else if (type_str == "NodePath") pi.type = Variant::NODE_PATH;
+												else if (type_str == "Object") pi.type = Variant::OBJECT;
+											} else if (field_key == "hint" && strcmp(ts_node_type(pv), "number") == 0) {
+												uint32_t pvs = ts_node_start_byte(pv);
+												uint32_t pve = ts_node_end_byte(pv);
+												pi.hint = (PropertyHint)std::stoi(source.substr(pvs, pve - pvs));
+											} else if (field_key == "hint_string" && strcmp(ts_node_type(pv), "string") == 0) {
+												uint32_t pvs = ts_node_start_byte(pv) + 1;
+												uint32_t pve = ts_node_end_byte(pv) - 1;
+												pi.hint_string = String(source.substr(pvs, pve - pvs).c_str());
+											}
+										}
+
+										properties[pi.name] = pi;
+									}
+								}
+							}
+						}
+					} else if (!is_static && !ts_node_is_null(prop_name_node) && !ts_node_is_null(value_node)) {
+						uint32_t name_start = ts_node_start_byte(prop_name_node);
+						uint32_t name_end = ts_node_end_byte(prop_name_node);
+						std::string prop_name = source.substr(name_start, name_end - name_start);
+						StringName field_name(prop_name.c_str());
+
+						if (properties.has(field_name)) {
+							const char *vt = ts_node_type(value_node);
+							uint32_t vs = ts_node_start_byte(value_node);
+							uint32_t ve = ts_node_end_byte(value_node);
+
+							if (strcmp(vt, "string") == 0) {
+								property_defaults[field_name] = String(source.substr(vs + 1, ve - vs - 2).c_str());
+							} else if (strcmp(vt, "number") == 0) {
+								std::string num_str = source.substr(vs, ve - vs);
+								if (properties[field_name].type == Variant::INT) property_defaults[field_name] = std::stoi(num_str);
+								else property_defaults[field_name] = std::stod(num_str);
+							} else if (strcmp(vt, "true") == 0) {
+								property_defaults[field_name] = true;
+							} else if (strcmp(vt, "false") == 0) {
+								property_defaults[field_name] = false;
+							}
+						}
+					}
+				}
+
 				if (strcmp(member_type, "method_definition") == 0) {
 					TSNode method_name_node = ts_node_child_by_field_name(member, "name", strlen("name"));
 					uint32_t start = ts_node_start_byte(method_name_node);
@@ -242,6 +287,7 @@ bool Javascript::compile() const {
 }
 
 Napi::Function Javascript::get_default_class() const {
+	compile();
 	if (default_class.IsEmpty()) {
 		return Napi::Function();
 	}
@@ -389,10 +435,12 @@ Ref<Script> Javascript::_get_base_script() const {
 }
 
 StringName Javascript::_get_global_name() const {
+	compile();
 	return class_name;
 }
 
 bool Javascript::_inherits_script(const Ref<Script> &p_script) const {
+	compile();
 	Ref<Javascript> base_script = Ref(p_script);
 	if (p_script.is_valid() && base_script->class_name == base_class_name) {
 		return true;
@@ -437,6 +485,7 @@ void Javascript::_set_source_code(const String &p_code) {
 }
 
 Error Javascript::_reload(bool p_keep_state) {
+	compile();
 	return Error::OK;
 }
 
@@ -454,10 +503,12 @@ String Javascript::_get_class_icon_path() const {
 }
 
 bool Javascript::_has_method(const StringName &p_method) const {
+	compile();
 	return methods.has(p_method);
 }
 
 bool Javascript::_has_static_method(const StringName &p_method) const {
+	compile();
 	if (methods.has(p_method)) {
 		return methods[p_method].flags & METHOD_FLAG_STATIC;
 	}
@@ -465,22 +516,27 @@ bool Javascript::_has_static_method(const StringName &p_method) const {
 }
 
 Variant Javascript::_get_script_method_argument_count(const StringName &p_method) const {
+	compile();
 	return Variant();
 }
 
 Dictionary Javascript::_get_method_info(const StringName &p_method) const {
+	compile();
 	return methods.get(p_method);
 }
 
 bool Javascript::_is_tool() const {
+	compile();
 	return is_tool_script;
 }
 
 bool Javascript::_is_valid() const {
+	compile();
 	return is_valid;
 }
 
 bool Javascript::_is_abstract() const {
+	compile();
 	return false;
 }
 
@@ -493,23 +549,28 @@ ScriptLanguage *Javascript::get_script_language() const {
 }
 
 StringName Javascript::get_global_name() const {
+	compile();
 	return class_name;
 }
 
 bool Javascript::_has_script_signal(const StringName &p_signal) const {
+	compile();
 	return false;
 }
 
 TypedArray<Dictionary> Javascript::_get_script_signal_list() const {
+	compile();
 	TypedArray<Dictionary> list;
 	return list;
 }
 
 bool Javascript::_has_property_default_value(const StringName &p_property) const {
+	compile();
 	return property_defaults.has(p_property);
 }
 
 Variant Javascript::_get_property_default_value(const StringName &p_property) const {
+	compile();
 	if (property_defaults.has(p_property)) {
 		return property_defaults[p_property];
 	}
@@ -517,16 +578,18 @@ Variant Javascript::_get_property_default_value(const StringName &p_property) co
 }
 
 void Javascript::_update_exports() {
+	compile();
 }
 
 TypedArray<Dictionary> Javascript::_get_script_method_list() const {
+	compile();
 	TypedArray<Dictionary> list;
 	return list;
 }
 
 TypedArray<Dictionary> Javascript::_get_script_property_list() const {
-	TypedArray<Dictionary> list;
 	compile();
+	TypedArray<Dictionary> list;
 	for (const KeyValue<StringName, PropertyInfo> &kv : properties) {
 		const PropertyInfo &pi = kv.value;
 		Dictionary d;

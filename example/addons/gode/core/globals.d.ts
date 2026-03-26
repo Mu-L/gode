@@ -155,7 +155,6 @@ declare global {
   const VariantArgument: typeof GodotVariantArgument;
   interface ExportEntry {
     type: string;
-    default?: VariantArgument;
     hint?: number;
     hint_string?: string;
   }
