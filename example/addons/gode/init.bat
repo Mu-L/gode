@@ -84,8 +84,8 @@ if exist "%PKGJSON%" (
         echo   "version": "1.0.0",
         echo   "type": "module",
         echo   "scripts": {
-        echo     "build": "tsc ^&^& tsc-alias",
-        echo     "watch": "tsc --watch ^& tsc-alias --watch"
+        echo     "build": "tsc",
+        echo     "watch": "tsc --watch"
         echo   },
         echo   "dependencies": {
         echo     "typescript": "^5.9.3"

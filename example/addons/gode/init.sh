@@ -81,8 +81,8 @@ else
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "build": "tsc && tsc-alias",
-    "watch": "tsc --watch & tsc-alias --watch"
+    "build": "tsc",
+    "watch": "tsc --watch"
   },
   "dependencies": {
     "typescript": "^5.9.3"

@@ -40675,7 +40675,7 @@ declare module "godot" {
         PhysicsServer2D: PhysicsServer2D;
         PhysicsServer3D: PhysicsServer3D;
         XRServer: XRServer;
-        GD: GDObjectSingleton;
+        GD: GD;
     }
 
     const _godot: GodotNamespace;

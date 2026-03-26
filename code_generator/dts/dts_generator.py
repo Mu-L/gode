@@ -699,7 +699,7 @@ class DtsGenerator(CodeGenerator):
 
         for s_name, s_type in singletons.items():
             lines.append(f'        {s_name}: {s_type};')
-        lines.append('        GD: GDObjectSingleton;')
+        lines.append('        GD: GD;')
 
         lines.append('    }')
         lines.append('')
