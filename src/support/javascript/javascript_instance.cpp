@@ -139,7 +139,18 @@ void JavascriptInstance::reload(bool p_keep_state) {
 
 	if (p_keep_state) {
 		for (const KeyValue<StringName, Variant> &E : old_state) {
-			instance.Set(String(E.key).utf8().get_data(), godot_to_napi(env, E.value));
+			std::string key = String(E.key).utf8().get_data();
+			size_t sep = key.find("::");
+			if (sep != std::string::npos) {
+				std::string obj_key = key.substr(0, sep);
+				std::string field_key = key.substr(sep + 2);
+				Napi::Value obj_val = instance.Get(obj_key);
+				if (obj_val.IsObject()) {
+					obj_val.As<Napi::Object>().Set(field_key, godot_to_napi(env, E.value));
+				}
+			} else {
+				instance.Set(key, godot_to_napi(env, E.value));
+			}
 		}
 	}
 
@@ -155,11 +166,22 @@ bool JavascriptInstance::set(const StringName &p_name, const Variant &p_value) {
 	v8::Isolate::Scope isolate_scope(NodeRuntime::isolate);
 	v8::HandleScope handle_scope(NodeRuntime::isolate);
 	std::string property_name = String(p_name).utf8().get_data();
-	if (javascript->properties.has(property_name.c_str())) {
-		Napi::Env env = js_instance.Value().Env();
-		return js_instance.Set(property_name, godot_to_napi(env, p_value));
+	if (!javascript->properties.has(property_name.c_str())) {
+		return false;
 	}
-	return false;
+	Napi::Env env = js_instance.Value().Env();
+	size_t sep = property_name.find("::");
+	if (sep != std::string::npos) {
+		std::string obj_key = property_name.substr(0, sep);
+		std::string field_key = property_name.substr(sep + 2);
+		Napi::Value obj_val = js_instance.Get(obj_key);
+		if (obj_val.IsObject()) {
+			obj_val.As<Napi::Object>().Set(field_key, godot_to_napi(env, p_value));
+			return true;
+		}
+		return false;
+	}
+	return js_instance.Set(property_name, godot_to_napi(env, p_value));
 }
 
 bool JavascriptInstance::get(const StringName &p_name, Variant &r_value) const {
@@ -178,13 +200,24 @@ bool JavascriptInstance::get(const StringName &p_name, Variant &r_value) const {
 	v8::Locker locker(NodeRuntime::isolate);
 	v8::Isolate::Scope isolate_scope(NodeRuntime::isolate);
 	v8::HandleScope handle_scope(NodeRuntime::isolate);
-	const char *prop_name = String(p_name).utf8().get_data();
-	if (javascript->properties.has(prop_name)) {
-		Napi::Value val = js_instance.Get(prop_name);
-		r_value = napi_to_godot(val);
-		return true;
+	std::string prop_name = String(p_name).utf8().get_data();
+	if (!javascript->properties.has(prop_name.c_str())) {
+		return false;
 	}
-	return false;
+	size_t sep = prop_name.find("::");
+	if (sep != std::string::npos) {
+		std::string obj_key = prop_name.substr(0, sep);
+		std::string field_key = prop_name.substr(sep + 2);
+		Napi::Value obj_val = js_instance.Get(obj_key);
+		if (obj_val.IsObject()) {
+			r_value = napi_to_godot(obj_val.As<Napi::Object>().Get(field_key));
+			return true;
+		}
+		return false;
+	}
+	Napi::Value val = js_instance.Get(prop_name);
+	r_value = napi_to_godot(val);
+	return true;
 }
 
 bool JavascriptInstance::has_method(const StringName &p_method) const {
@@ -349,10 +382,18 @@ void JavascriptInstance::get_property_list(const GDExtensionPropertyInfo *&r_lis
 	prop_list_gde.clear();
 
 	if (javascript.is_valid()) {
-		const godot::HashMap<godot::StringName, godot::PropertyInfo> &props = javascript->get_exported_properties();
-		prop_list_cache.reserve(props.size());
-		for (const godot::KeyValue<godot::StringName, godot::PropertyInfo> &kv : props) {
-			prop_list_cache.push_back(kv.value);
+		const godot::Vector<godot::PropertyInfo> &ordered = javascript->get_property_list_ordered();
+		if (!ordered.is_empty()) {
+			prop_list_cache.reserve(ordered.size());
+			for (const godot::PropertyInfo &pi : ordered) {
+				prop_list_cache.push_back(pi);
+			}
+		} else {
+			const godot::HashMap<godot::StringName, godot::PropertyInfo> &props = javascript->get_exported_properties();
+			prop_list_cache.reserve(props.size());
+			for (const godot::KeyValue<godot::StringName, godot::PropertyInfo> &kv : props) {
+				prop_list_cache.push_back(kv.value);
+			}
 		}
 	}
 

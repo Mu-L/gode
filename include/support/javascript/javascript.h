@@ -29,6 +29,7 @@ protected:
 	mutable godot::HashMap<godot::StringName, godot::MethodInfo> methods;
 	mutable godot::HashMap<godot::StringName, godot::MethodInfo> signals;
 	mutable godot::HashMap<godot::StringName, godot::PropertyInfo> properties;
+	mutable godot::Vector<godot::PropertyInfo> property_list; // ordered, may include GROUP entries
 	mutable godot::HashMap<godot::StringName, godot::Variant> property_defaults;
 	mutable godot::HashMap<godot::StringName, godot::Variant> constants;
 	mutable godot::HashMap<godot::StringName, int> member_lines;
@@ -43,6 +44,7 @@ public:
 	virtual bool compile() const;
 	Napi::Function get_default_class() const;
 	const godot::HashMap<godot::StringName, godot::PropertyInfo> &get_exported_properties() const { return properties; }
+	const godot::Vector<godot::PropertyInfo> &get_property_list_ordered() const { return property_list; }
 	const godot::HashMap<godot::StringName, godot::Variant> &get_property_defaults() const { return property_defaults; }
 
 protected:

@@ -14,6 +14,40 @@ using namespace gode;
 
 extern "C" const TSLanguage *tree_sitter_typescript();
 
+static Variant::Type parse_type_string(const std::string &type_str) {
+	if (type_str == "bool") {
+		return Variant::BOOL;
+	}
+	if (type_str == "int") {
+		return Variant::INT;
+	}
+	if (type_str == "float" || type_str == "number") {
+		return Variant::FLOAT;
+	}
+	if (type_str == "string") {
+		return Variant::STRING;
+	}
+	if (type_str == "Vector2") {
+		return Variant::VECTOR2;
+	}
+	if (type_str == "Vector2i") {
+		return Variant::VECTOR2I;
+	}
+	if (type_str == "Vector3") {
+		return Variant::VECTOR3;
+	}
+	if (type_str == "Vector3i") {
+		return Variant::VECTOR3I;
+	}
+	if (type_str == "Color") {
+		return Variant::COLOR;
+	}
+	if (type_str == "NodePath") {
+		return Variant::NODE_PATH;
+	}
+	return Variant::NIL;
+}
+
 static String get_js_path(const String &ts_path) {
 	String rel = ts_path;
 	if (rel.begins_with("res://")) {
@@ -192,6 +226,86 @@ static void collect_parent_properties(const StringName &parent_name, const std::
 	}
 }
 
+static HashMap<StringName, Vector<PropertyInfo>> parse_interfaces(TSNode root_node, uint32_t child_count, const std::string &source) {
+	HashMap<StringName, Vector<PropertyInfo>> interfaces;
+
+	for (uint32_t i = 0; i < child_count; i++) {
+		TSNode child = ts_node_child(root_node, i);
+		TSNode iface_node = { 0 };
+
+		if (strcmp(ts_node_type(child), "interface_declaration") == 0) {
+			iface_node = child;
+		} else if (strcmp(ts_node_type(child), "export_statement") == 0) {
+			for (uint32_t j = 0; j < ts_node_child_count(child); j++) {
+				TSNode en = ts_node_child(child, j);
+				if (strcmp(ts_node_type(en), "interface_declaration") == 0) {
+					iface_node = en;
+					break;
+				}
+			}
+		}
+
+		if (ts_node_is_null(iface_node)) {
+			continue;
+		}
+
+		TSNode name_node = ts_node_child_by_field_name(iface_node, "name", 4);
+		if (ts_node_is_null(name_node)) {
+			continue;
+		}
+		uint32_t ns = ts_node_start_byte(name_node);
+		uint32_t ne = ts_node_end_byte(name_node);
+		StringName iface_name(source.substr(ns, ne - ns).c_str());
+
+		TSNode body = ts_node_child_by_field_name(iface_node, "body", 4);
+		if (ts_node_is_null(body)) {
+			continue;
+		}
+
+		Vector<PropertyInfo> fields;
+		for (uint32_t j = 0; j < ts_node_child_count(body); j++) {
+			TSNode member = ts_node_child(body, j);
+			if (strcmp(ts_node_type(member), "property_signature") != 0) {
+				continue;
+			}
+
+			TSNode field_name_node = ts_node_child_by_field_name(member, "name", 4);
+			if (ts_node_is_null(field_name_node)) {
+				continue;
+			}
+			uint32_t fns = ts_node_start_byte(field_name_node);
+			uint32_t fne = ts_node_end_byte(field_name_node);
+
+			PropertyInfo pi;
+			pi.name = StringName(source.substr(fns, fne - fns).c_str());
+			pi.usage = PROPERTY_USAGE_DEFAULT;
+			pi.hint = PROPERTY_HINT_NONE;
+			pi.type = Variant::NIL;
+
+			TSNode type_node = ts_node_child_by_field_name(member, "type", 4);
+			if (!ts_node_is_null(type_node)) {
+				TSNode inner = ts_node_named_child(type_node, 0);
+				if (!ts_node_is_null(inner)) {
+					uint32_t ts = ts_node_start_byte(inner);
+					uint32_t te = ts_node_end_byte(inner);
+					std::string type_str = source.substr(ts, te - ts);
+					pi.type = parse_type_string(type_str);
+					// 若 type 未能解析为已知 Variant 类型，保存原始类型名供嵌套检测
+					if (pi.type == Variant::NIL) {
+						pi.class_name = StringName(type_str.c_str());
+					}
+				}
+			}
+
+			fields.push_back(pi);
+		}
+
+		interfaces[iface_name] = fields;
+	}
+
+	return interfaces;
+}
+
 static TSNode find_default_class(TSNode root_node, uint32_t child_count) {
 	for (uint32_t i = 0; i < child_count; i++) {
 		TSNode child = ts_node_child(root_node, i);
@@ -235,9 +349,46 @@ static void parse_class_metadata(TSNode class_node, const std::string &source, S
 	}
 }
 
-static void parse_class_members(TSNode class_node, const std::string &source, HashMap<StringName, PropertyInfo> &properties, HashMap<StringName, Variant> &property_defaults, HashMap<StringName, MethodInfo> &methods, HashMap<StringName, int> &member_lines) {
+static void expand_interface_fields(
+		const StringName &iface_name,
+		const std::string &prefix,
+		int depth,
+		HashSet<StringName> &visited,
+		const HashMap<StringName, Vector<PropertyInfo>> &interfaces,
+		HashMap<StringName, PropertyInfo> &properties,
+		Vector<PropertyInfo> &property_list) {
+	if (visited.has(iface_name)) return;
+	visited.insert(iface_name);
+
+	PropertyInfo group_pi;
+	group_pi.name = iface_name;
+	group_pi.usage = depth == 0 ? PROPERTY_USAGE_GROUP : PROPERTY_USAGE_SUBGROUP;
+	group_pi.hint_string = String(prefix.c_str());
+	property_list.push_back(group_pi);
+
+	for (const PropertyInfo &field : interfaces[iface_name]) {
+		std::string sub_prefix = prefix + String(field.name).utf8().get_data();
+		StringName sub_name(sub_prefix.c_str());
+		std::string field_type = field.class_name.is_empty() ? "" : String(field.class_name).utf8().get_data();
+		StringName nested_iface(field_type.c_str());
+		if (!field_type.empty() && interfaces.has(nested_iface)) {
+			expand_interface_fields(nested_iface, sub_prefix + "::", depth + 1, visited, interfaces, properties, property_list);
+		} else {
+			PropertyInfo sub_pi = field;
+			sub_pi.name = sub_name;
+			properties[sub_name] = sub_pi;
+			property_list.push_back(sub_pi);
+		}
+	}
+
+	visited.erase(iface_name);
+}
+
+static void parse_class_members(TSNode class_node, const std::string &source, HashMap<StringName, PropertyInfo> &properties, Vector<PropertyInfo> &property_list, HashMap<StringName, Variant> &property_defaults, HashMap<StringName, MethodInfo> &methods, HashMap<StringName, int> &member_lines, const HashMap<StringName, Vector<PropertyInfo>> &interfaces) {
 	TSNode body_node = ts_node_child_by_field_name(class_node, "body", 4);
-	if (ts_node_is_null(body_node)) return;
+	if (ts_node_is_null(body_node)) {
+		return;
+	}
 
 	for (uint32_t j = 0; j < ts_node_child_count(body_node); j++) {
 		TSNode member = ts_node_child(body_node, j);
@@ -257,13 +408,17 @@ static void parse_class_members(TSNode class_node, const std::string &source, Ha
 				}
 			}
 
-			if (!has_export_decorator) continue;
+			if (!has_export_decorator) {
+				continue;
+			}
 
 			TSNode field_name_node = ts_node_child_by_field_name(member, "name", 4);
 			TSNode field_value_node = ts_node_child_by_field_name(member, "value", 5);
 			TSNode field_type_node = ts_node_child_by_field_name(member, "type", 4);
 
-			if (ts_node_is_null(field_name_node)) continue;
+			if (ts_node_is_null(field_name_node)) {
+				continue;
+			}
 
 			uint32_t fns = ts_node_start_byte(field_name_node);
 			uint32_t fne = ts_node_end_byte(field_name_node);
@@ -275,47 +430,47 @@ static void parse_class_members(TSNode class_node, const std::string &source, Ha
 			pi.hint = PROPERTY_HINT_NONE;
 			pi.type = Variant::NIL;
 
+			std::string type_str;
 			if (!ts_node_is_null(field_type_node)) {
-				field_type_node = ts_node_named_child(field_type_node, 0);
-				uint32_t ts = ts_node_start_byte(field_type_node);
-				uint32_t te = ts_node_end_byte(field_type_node);
-				std::string type_str = source.substr(ts, te - ts);
-
-				if (type_str == "boolean") pi.type = Variant::BOOL;
-				else if (type_str == "number") pi.type = Variant::FLOAT;
-				else if (type_str == "string") pi.type = Variant::STRING;
-				else if (type_str == "Vector2") pi.type = Variant::VECTOR2;
-				else if (type_str == "Vector2i") pi.type = Variant::VECTOR2I;
-				else if (type_str == "Vector3") pi.type = Variant::VECTOR3;
-				else if (type_str == "Vector3i") pi.type = Variant::VECTOR3I;
-				else if (type_str == "Vector4") pi.type = Variant::VECTOR4;
-				else if (type_str == "Vector4i") pi.type = Variant::VECTOR4I;
-				else if (type_str == "Color") pi.type = Variant::COLOR;
-				else if (type_str == "NodePath") pi.type = Variant::NODE_PATH;
+				TSNode inner_type = ts_node_named_child(field_type_node, 0);
+				if (!ts_node_is_null(inner_type)) {
+					uint32_t ts = ts_node_start_byte(inner_type);
+					uint32_t te = ts_node_end_byte(inner_type);
+					type_str = source.substr(ts, te - ts);
+					pi.type = parse_type_string(type_str);
+				}
 			}
 
-			properties[field_name] = pi;
+			StringName iface_key(type_str.c_str());
+			if (!type_str.empty() && interfaces.has(iface_key)) {
+				std::string prefix = String(field_name).utf8().get_data() + std::string("::");
+				HashSet<StringName> visited;
+				expand_interface_fields(iface_key, prefix, 0, visited, interfaces, properties, property_list);
+			} else {
+				properties[field_name] = pi;
+				property_list.push_back(pi);
 
-			if (!ts_node_is_null(field_value_node)) {
-				const char *vt = ts_node_type(field_value_node);
-				uint32_t vs = ts_node_start_byte(field_value_node);
-				uint32_t ve = ts_node_end_byte(field_value_node);
+				if (!ts_node_is_null(field_value_node)) {
+					const char *vt = ts_node_type(field_value_node);
+					uint32_t vs = ts_node_start_byte(field_value_node);
+					uint32_t ve = ts_node_end_byte(field_value_node);
 
-				if (strcmp(vt, "string") == 0) {
-					property_defaults[field_name] = String(source.substr(vs + 1, ve - vs - 2).c_str());
-				} else if (strcmp(vt, "number") == 0) {
-					std::string num_str = source.substr(vs, ve - vs);
-					if (pi.type == Variant::INT) {
-						property_defaults[field_name] = std::stoi(num_str);
-					} else {
-						property_defaults[field_name] = std::stod(num_str);
+					if (strcmp(vt, "string") == 0) {
+						property_defaults[field_name] = String(source.substr(vs + 1, ve - vs - 2).c_str());
+					} else if (strcmp(vt, "number") == 0) {
+						std::string num_str = source.substr(vs, ve - vs);
+						if (pi.type == Variant::INT) {
+							property_defaults[field_name] = std::stoi(num_str);
+						} else {
+							property_defaults[field_name] = std::stod(num_str);
+						}
+					} else if (strcmp(vt, "true") == 0) {
+						property_defaults[field_name] = true;
+					} else if (strcmp(vt, "false") == 0) {
+						property_defaults[field_name] = false;
+					} else if (strcmp(vt, "new_expression") == 0) {
+						property_defaults[field_name] = NodeRuntime::eval_expression(source.substr(vs, ve - vs));
 					}
-				} else if (strcmp(vt, "true") == 0) {
-					property_defaults[field_name] = true;
-				} else if (strcmp(vt, "false") == 0) {
-					property_defaults[field_name] = false;
-				} else if (strcmp(vt, "new_expression") == 0) {
-					property_defaults[field_name] = NodeRuntime::eval_expression(source.substr(vs, ve - vs));
 				}
 			}
 			continue;
@@ -323,7 +478,9 @@ static void parse_class_members(TSNode class_node, const std::string &source, Ha
 
 		if (strcmp(member_type, "method_definition") == 0) {
 			TSNode mn = ts_node_child_by_field_name(member, "name", 4);
-			if (ts_node_is_null(mn)) continue;
+			if (ts_node_is_null(mn)) {
+				continue;
+			}
 
 			uint32_t s = ts_node_start_byte(mn);
 			uint32_t e = ts_node_end_byte(mn);
@@ -339,37 +496,31 @@ static void parse_class_members(TSNode class_node, const std::string &source, Ha
 
 			MethodInfo mi;
 			mi.name = method_name;
-			if (is_static) mi.flags |= METHOD_FLAG_STATIC;
+			if (is_static) {
+				mi.flags |= METHOD_FLAG_STATIC;
+			}
 			methods[method_name] = mi;
 			member_lines[method_name] = ts_node_start_point(member).row + 1;
 		}
 	}
 }
 
-static Variant::Type parse_type_string(const std::string &type_str) {
-	if (type_str == "bool") return Variant::BOOL;
-	if (type_str == "int") return Variant::INT;
-	if (type_str == "float" || type_str == "number") return Variant::FLOAT;
-	if (type_str == "string") return Variant::STRING;
-	if (type_str == "Vector2") return Variant::VECTOR2;
-	if (type_str == "Vector2i") return Variant::VECTOR2I;
-	if (type_str == "Vector3") return Variant::VECTOR3;
-	if (type_str == "Vector3i") return Variant::VECTOR3I;
-	if (type_str == "Color") return Variant::COLOR;
-	if (type_str == "NodePath") return Variant::NODE_PATH;
-	return Variant::NIL;
-}
-
 static void parse_exports_object(TSNode obj_node, const std::string &source, HashMap<StringName, PropertyInfo> &properties, HashMap<StringName, Variant> &property_defaults) {
 	// obj_node 是外层 object，每个 pair 的 key 是属性名，value 是描述对象 { type, default, ... }
 	for (uint32_t j = 0; j < ts_node_child_count(obj_node); j++) {
 		TSNode pair = ts_node_child(obj_node, j);
-		if (strcmp(ts_node_type(pair), "pair") != 0) continue;
+		if (strcmp(ts_node_type(pair), "pair") != 0) {
+			continue;
+		}
 
 		TSNode key = ts_node_child_by_field_name(pair, "key", 3);
 		TSNode value = ts_node_child_by_field_name(pair, "value", 5);
-		if (ts_node_is_null(key) || ts_node_is_null(value)) continue;
-		if (strcmp(ts_node_type(value), "object") != 0) continue;
+		if (ts_node_is_null(key) || ts_node_is_null(value)) {
+			continue;
+		}
+		if (strcmp(ts_node_type(value), "object") != 0) {
+			continue;
+		}
 
 		uint32_t ks = ts_node_start_byte(key);
 		uint32_t ke = ts_node_end_byte(key);
@@ -383,11 +534,15 @@ static void parse_exports_object(TSNode obj_node, const std::string &source, Has
 
 		for (uint32_t k = 0; k < ts_node_child_count(value); k++) {
 			TSNode field = ts_node_child(value, k);
-			if (strcmp(ts_node_type(field), "pair") != 0) continue;
+			if (strcmp(ts_node_type(field), "pair") != 0) {
+				continue;
+			}
 
 			TSNode fkey = ts_node_child_by_field_name(field, "key", 3);
 			TSNode fval = ts_node_child_by_field_name(field, "value", 5);
-			if (ts_node_is_null(fkey) || ts_node_is_null(fval)) continue;
+			if (ts_node_is_null(fkey) || ts_node_is_null(fval)) {
+				continue;
+			}
 
 			uint32_t fks = ts_node_start_byte(fkey);
 			uint32_t fke = ts_node_end_byte(fkey);
@@ -421,11 +576,15 @@ static void parse_exports_object(TSNode obj_node, const std::string &source, Has
 // static exports = {...} 在 TS 中是 class body 内的 public_field_definition（带 static 修饰）
 static void parse_static_exports(TSNode class_node, const std::string &source, HashMap<StringName, PropertyInfo> &properties, HashMap<StringName, Variant> &property_defaults) {
 	TSNode body = ts_node_child_by_field_name(class_node, "body", 4);
-	if (ts_node_is_null(body)) return;
+	if (ts_node_is_null(body)) {
+		return;
+	}
 
 	for (uint32_t i = 0; i < ts_node_child_count(body); i++) {
 		TSNode member = ts_node_child(body, i);
-		if (strcmp(ts_node_type(member), "public_field_definition") != 0) continue;
+		if (strcmp(ts_node_type(member), "public_field_definition") != 0) {
+			continue;
+		}
 
 		// 检查是否有 static 修饰
 		bool is_static = false;
@@ -435,18 +594,26 @@ static void parse_static_exports(TSNode class_node, const std::string &source, H
 				break;
 			}
 		}
-		if (!is_static) continue;
+		if (!is_static) {
+			continue;
+		}
 
 		// 检查字段名是否为 "exports"
 		TSNode name = ts_node_child_by_field_name(member, "name", 4);
-		if (ts_node_is_null(name)) continue;
+		if (ts_node_is_null(name)) {
+			continue;
+		}
 		uint32_t ns = ts_node_start_byte(name);
 		uint32_t ne = ts_node_end_byte(name);
-		if (source.substr(ns, ne - ns) != "exports") continue;
+		if (source.substr(ns, ne - ns) != "exports") {
+			continue;
+		}
 
 		// 解析 value（object 字面量）
 		TSNode value = ts_node_child_by_field_name(member, "value", 5);
-		if (ts_node_is_null(value) || strcmp(ts_node_type(value), "object") != 0) continue;
+		if (ts_node_is_null(value) || strcmp(ts_node_type(value), "object") != 0) {
+			continue;
+		}
 
 		parse_exports_object(value, source, properties, property_defaults);
 		return;
@@ -477,6 +644,7 @@ bool Typescript::compile() const {
 
 	class_name = StringName();
 	base_class_name = StringName();
+	property_list.clear();
 	methods.clear();
 	signals.clear();
 	properties.clear();
@@ -495,8 +663,9 @@ bool Typescript::compile() const {
 		return false;
 	}
 
+	HashMap<StringName, Vector<PropertyInfo>> interfaces = parse_interfaces(root_node, child_count, source);
 	parse_class_metadata(class_node, source, class_name, base_class_name);
-	parse_class_members(class_node, source, properties, property_defaults, methods, member_lines);
+	parse_class_members(class_node, source, properties, property_list, property_defaults, methods, member_lines, interfaces);
 	parse_static_exports(class_node, source, properties, property_defaults);
 	collect_parent_properties(base_class_name, source, root_node, child_count, get_path(), properties, property_defaults);
 
