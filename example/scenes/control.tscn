@@ -10,3 +10,6 @@ anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
 script = ExtResource("1_5p55f")
+v = "hello132"
+i::a = 1.0
+i::b = "hello111"
